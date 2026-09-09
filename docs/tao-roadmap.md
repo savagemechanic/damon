@@ -28,6 +28,12 @@ Delivered milestones:
 
 Remaining implementation priorities:
 
+The active architecture expansion makes fundamental networking a low-level Tao
+capability. Build from bytes/interfaces/IP/routes/packets/sockets/connections to
+protocols and application clients. Native capability resolution replaces generic
+application automation; accessibility and pixels are escape hatches only. See
+`network-architecture.md` and `capabilities.md`.
+
 1. Populate richer file/tool/procedure/process world records from deterministic
    discovery and extend references from projects to files and operation results.
 2. Expand semantic candidates incrementally across entities and clauses, combine

@@ -4,6 +4,7 @@ pub mod graph;
 pub mod language;
 pub mod learning;
 pub mod model;
+pub mod network;
 pub mod policy;
 pub mod reason;
 pub mod runtime;

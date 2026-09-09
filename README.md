@@ -5,6 +5,13 @@ The `tao` branch uses compact IDs and arrays for memory, hashes for recognition,
 graphs for meaning, count-based uncertainty, and deterministic tools for work.
 LLMs are fallback teachers. They never execute actions directly.
 
+Networking starts with byte arrays, interfaces, addresses, packets, neighbors,
+routes, sockets, connections, protocol state, and a network graph—not HTTP or the
+web. Likewise, computer use resolves to native capabilities over system, network,
+compute, and data primitives before any application or UI fallback. See the
+[network architecture](docs/network-architecture.md) and
+[capability direction](docs/capabilities.md).
+
 There is no runtime database, ORM, vector database, agent framework, or provider
 SDK. The kernel currently has no third-party Rust dependencies.
 
