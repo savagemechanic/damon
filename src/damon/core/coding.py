@@ -11,6 +11,17 @@ from damon.runtime.executor import ToolExecutor, ToolResult
 from damon.tools.registry import ToolRegistry
 
 
+CODING_TOOL_NAMES = (
+    "list_files",
+    "read_file",
+    "search_code",
+    "write_file",
+    "apply_patch",
+    "run_command",
+    "git_diff",
+)
+
+
 CODING_SYSTEM_PROMPT = """You are Damon, a local-first coding agent.
 The Python runtime has already inspected the repository and will verify your work after you finish.
 Inspect before editing. Search narrowly. Make the smallest correct change. Prefer patches over rewrites.
@@ -93,6 +104,8 @@ class CodingAgent:
         self.model = model
         self.registry = registry
         self.executor = executor
+        self.model_registry = registry.select(CODING_TOOL_NAMES)
+        self.model_executor = ToolExecutor(self.model_registry, executor.policy)
         self.max_attempts = max_attempts
         self.max_agent_steps = max_agent_steps
         self.evidence_chars = evidence_chars
@@ -149,8 +162,8 @@ class CodingAgent:
         for number in range(1, self.max_attempts + 1):
             agent = Agent(
                 self.model,
-                self.registry,
-                self.executor,
+                self.model_registry,
+                self.model_executor,
                 max_steps=self.max_agent_steps,
                 events=self.events,
                 system_prompt=CODING_SYSTEM_PROMPT,

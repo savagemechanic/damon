@@ -51,12 +51,28 @@ class ToolSpec:
             properties[name] = _json_type(annotation)
             if parameter.default is inspect.Signature.empty:
                 required.append(name)
-        return {"type": "function", "function": {"name": self.name, "description": self.description, "parameters": {"type": "object", "properties": properties, "required": required, "additionalProperties": False}}}
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                    "additionalProperties": False,
+                },
+            },
+        }
 
 
 def tool(*, permission: str = "safe", timeout: float = 30.0, name: str | None = None):
     def decorate(function: ToolFunction) -> ToolFunction:
-        setattr(function, "__damon_tool__", {"name": name or function.__name__, "permission": permission, "timeout": timeout})
+        setattr(function, "__damon_tool__", {
+            "name": name or function.__name__,
+            "permission": permission,
+            "timeout": timeout,
+        })
         return function
     return decorate
 
@@ -69,7 +85,13 @@ class ToolRegistry:
         metadata = getattr(function, "__damon_tool__", None)
         if metadata is None:
             raise ValueError(f"{function.__name__} is not decorated with @tool")
-        spec = ToolSpec(name=metadata["name"], description=(inspect.getdoc(function) or "").split("\n", 1)[0], function=function, permission=metadata["permission"], timeout=float(metadata["timeout"]))
+        spec = ToolSpec(
+            name=metadata["name"],
+            description=(inspect.getdoc(function) or "").split("\n", 1)[0],
+            function=function,
+            permission=metadata["permission"],
+            timeout=float(metadata["timeout"]),
+        )
         if spec.name in self._tools:
             raise ValueError(f"duplicate tool: {spec.name}")
         self._tools[spec.name] = spec
@@ -83,6 +105,13 @@ class ToolRegistry:
 
     def schemas(self) -> list[dict[str, Any]]:
         return [spec.schema() for spec in self._tools.values()]
+
+    def select(self, names: list[str] | tuple[str, ...] | set[str]) -> "ToolRegistry":
+        """Create a registry view containing only explicitly named tools."""
+        selected = ToolRegistry()
+        for name in names:
+            selected.register(self.get(name).function)
+        return selected
 
     def names(self) -> list[str]:
         return sorted(self._tools)
