@@ -12,7 +12,11 @@ impl Default for Policy {
 }
 impl Policy {
     pub fn check(&self, action: &Action) -> Result<(), String> {
-        if self.allowed.contains(action.effects) {
+        let required = crate::tools::required_effects(action.tool)?;
+        if action.effects != required {
+            return Err("action effects do not match the registered tool".into());
+        }
+        if self.allowed.contains(required) {
             Ok(())
         } else {
             Err(format!(

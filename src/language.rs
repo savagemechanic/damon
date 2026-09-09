@@ -9,6 +9,7 @@ pub const INTENT_GIT_STATUS: IntentId = IntentId(1);
 pub const INTENT_GIT_DIFF: IntentId = IntentId(2);
 pub const INTENT_RUN_TESTS: IntentId = IntentId(3);
 pub const INTENT_LIST_FILES: IntentId = IntentId(4);
+pub const INTENT_CHANGED_FILES: IntentId = IntentId(5);
 const BEAM_WIDTH: usize = 4;
 
 #[derive(Debug)]
@@ -73,11 +74,76 @@ fn lexical_evidence(text: &str, intent: IntentId) -> i32 {
         {
             96
         }
+        INTENT_CHANGED_FILES
+            if text.contains("yesterday")
+                && (text.contains("changed") || text.contains("modified")) =>
+        {
+            150
+        }
         _ => 0,
     }
 }
 
 pub fn understand(input: &str, data: &DamonData) -> Interpretation {
+    let text = normalize(input);
+    if text
+        .split_whitespace()
+        .any(|w| matches!(w, "never" | "don't" | "unless" | "tomorrow"))
+        || text.contains("do not")
+    {
+        return Interpretation::Unknown {
+            feature: feature_hash(input),
+        };
+    }
+    if let Some(meaning) = data.learned_graphs.get(&feature_hash(input)) {
+        if crate::semantics::validate(meaning, data).is_ok() {
+            return Interpretation::Resolved(meaning.clone());
+        }
+    }
+    if text.len() > 8192 {
+        return Interpretation::Unknown {
+            feature: feature_hash(input),
+        };
+    }
+    for (separator, relation) in [
+        (" and if they pass ", crate::semantics::Relation::Condition),
+        (" and then ", crate::semantics::Relation::Dependency),
+        (" and ", crate::semantics::Relation::Dependency),
+    ] {
+        if let Some((first, second)) = text.split_once(separator) {
+            // A bounded two-clause parse, never combinatorial enumeration.
+            if second.contains(" and ") {
+                return Interpretation::Unknown {
+                    feature: feature_hash(input),
+                };
+            }
+            if let (Interpretation::Resolved(mut a), Interpretation::Resolved(b)) = (
+                understand_single(first, data),
+                understand_single(second, data),
+            ) {
+                let offset = a.nodes.len() as u32;
+                a.nodes.extend(b.nodes);
+                a.edges.extend(b.edges.into_iter().map(|e| MeaningEdge {
+                    source: e.source + offset,
+                    target: e.target + offset,
+                    relation: e.relation,
+                }));
+                a.edges.push(MeaningEdge {
+                    source: offset,
+                    target: 0,
+                    relation: relation as u16,
+                });
+                a.confidence = a.confidence.min(b.confidence);
+                return Interpretation::Resolved(a);
+            }
+            return Interpretation::Unknown {
+                feature: feature_hash(input),
+            };
+        }
+    }
+    understand_single(input, data)
+}
+fn understand_single(input: &str, data: &DamonData) -> Interpretation {
     let text = normalize(input);
     let words: Vec<&str> = text
         .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
@@ -87,7 +153,8 @@ pub fn understand(input: &str, data: &DamonData) -> Interpretation {
         .entities
         .iter()
         .find(|e| words.iter().any(|w| *w == e.name.to_ascii_lowercase()))
-        .map(|e| e.id);
+        .map(|e| e.id)
+        .or_else(|| data.resolve("damon"));
     let feature = feature_hash(&text);
     let learned = data.language_candidates(feature);
     let mut candidates = Vec::new();
@@ -97,6 +164,7 @@ pub fn understand(input: &str, data: &DamonData) -> Interpretation {
         INTENT_GIT_DIFF,
         INTENT_RUN_TESTS,
         INTENT_LIST_FILES,
+        INTENT_CHANGED_FILES,
     ] {
         let evidence = lexical_evidence(&text, intent);
         let prior = learned
@@ -104,7 +172,7 @@ pub fn understand(input: &str, data: &DamonData) -> Interpretation {
             .find(|(id, _)| *id == intent)
             .map(|(_, count)| count.saturating_add(1))
             .unwrap_or(1);
-        if evidence > 0 || prior > 1 {
+        if evidence > 0 {
             candidates.push(CandidateGraph::new(intent, target, evidence, prior));
         }
     }
@@ -131,6 +199,7 @@ pub fn candidate_to_meaning(candidate: &CandidateGraph, confidence: u8) -> Meani
     MeaningGraph {
         intent: candidate.intent,
         target: candidate.target,
+        nodes: candidate.nodes.clone(),
         edges: candidate
             .edges
             .iter()

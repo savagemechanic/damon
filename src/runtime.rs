@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::data::DamonData;
 use crate::language::{self, candidate_to_meaning, Interpretation};
 use crate::learning;
-use crate::model::{ModelRouter, ProviderKind};
+use crate::model::ModelRouter;
 use crate::policy::Policy;
 use crate::tools;
 use crate::types::{MeaningGraph, ToolResult};
@@ -57,17 +57,44 @@ impl Damon {
             },
         };
 
-        let action = match tools::action_from_meaning(&meaning, &self.data) {
-            Ok(a) => a,
+        if let Err(e) = crate::semantics::validate_request(input, &meaning, &self.data) {
+            return format!("I need a clearer request: {e}");
+        }
+        let plan = match crate::reason::plan(&meaning, &self.data) {
+            Ok(plan) => plan,
             Err(e) => return e,
         };
-        if let Err(e) = self.policy.check(&action) {
-            return format!("I understood the request, but policy blocked it: {e}");
+        // Check the entire plan before any tool can produce side effects.
+        for action in &plan.actions {
+            if let Err(e) = self.policy.check(action) {
+                return format!("Policy blocked the plan: {e}");
+            }
         }
-
-        let result = tools::execute(&action);
-        learning::observe_verified(&mut self.data, feature, &meaning, result.success);
-        let rendered = render_result(result);
+        let mut outcomes: Vec<bool> = Vec::new();
+        let mut messages = Vec::new();
+        for (index, action) in plan.actions.iter().enumerate() {
+            if plan
+                .dependencies
+                .iter()
+                .any(|d| d.step == index && d.success_required && !outcomes[d.previous])
+            {
+                outcomes.push(false);
+                messages.push(
+                    "Skipped the dependent action because its prerequisite did not pass.".into(),
+                );
+                continue;
+            }
+            let result = tools::execute(action, &self.policy);
+            outcomes.push(result.success);
+            messages.push(render_result(result));
+        }
+        learning::observe_verified(
+            &mut self.data,
+            feature,
+            &meaning,
+            outcomes.iter().all(|v| *v),
+        );
+        let rendered = messages.join("\n");
         match self.data.save() {
             Ok(()) => rendered,
             Err(e) => format!(
@@ -124,38 +151,12 @@ impl Damon {
     }
 
     fn ask_teacher(&self, input: &str) -> Result<MeaningGraph, String> {
-        let prompt = format!(
-            "You are Damon's language teacher. Map the user's English request to exactly one token and output only that token. Allowed tokens: GIT_STATUS, GIT_DIFF, RUN_TESTS, LIST_FILES. If none fit, output UNKNOWN. User: {input}"
-        );
+        let prompt = crate::semantics::teacher_prompt(input, &self.data);
         let response = self.models.infer_validated(&prompt, |text| {
-            if matches!(
-                text.trim(),
-                "GIT_STATUS" | "GIT_DIFF" | "RUN_TESTS" | "LIST_FILES"
-            ) {
-                Ok(())
-            } else {
-                Err("teacher returned an unsupported interpretation".into())
-            }
+            crate::semantics::parse_teacher(text, &self.data)
+                .and_then(|m| crate::semantics::validate_request(input, &m, &self.data))
         })?;
-        let token = response.text.trim().lines().next().unwrap_or("").trim();
-        let intent = match token {
-            "GIT_STATUS" => language::INTENT_GIT_STATUS,
-            "GIT_DIFF" => language::INTENT_GIT_DIFF,
-            "RUN_TESTS" => language::INTENT_RUN_TESTS,
-            "LIST_FILES" => language::INTENT_LIST_FILES,
-            _ => return Err(format!("teacher returned {token:?}")),
-        };
-        let confidence = match response.provider {
-            ProviderKind::Ollama => 190,
-            ProviderKind::External => 185,
-            ProviderKind::Cloud => 180,
-        };
-        Ok(MeaningGraph {
-            intent,
-            target: self.data.resolve("damon"),
-            edges: Vec::new(),
-            confidence,
-        })
+        crate::semantics::parse_teacher(&response.text, &self.data)
     }
 }
 

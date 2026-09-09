@@ -1,29 +1,66 @@
-use crate::data::DamonData;
-use crate::tools;
-use crate::types::{Action, MeaningGraph};
+use crate::{
+    data::DamonData,
+    semantics::{self, Relation},
+    tools,
+    types::{Action, MeaningGraph},
+};
 
-pub fn resolve(meaning: &MeaningGraph, data: &DamonData) -> Result<Action, String> {
-    tools::action_from_meaning(meaning, data)
+#[derive(Debug)]
+pub struct Dependency {
+    pub step: usize,
+    pub previous: usize,
+    pub success_required: bool,
+}
+#[derive(Debug)]
+pub struct Plan {
+    pub actions: Vec<Action>,
+    pub dependencies: Vec<Dependency>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::language::INTENT_GIT_DIFF;
-    use crate::types::MeaningGraph;
-
-    #[test]
-    fn known_meaning_resolves_to_action() {
-        let p = std::env::temp_dir().join(format!("damon-reason-{}.data", std::process::id()));
-        let _ = std::fs::remove_file(&p);
-        let data = DamonData::open(&p).unwrap();
-        let meaning = MeaningGraph {
-            intent: INTENT_GIT_DIFF,
-            target: data.resolve("damon"),
-            edges: Vec::new(),
-            confidence: 200,
-        };
-        assert!(resolve(&meaning, &data).is_ok());
-        let _ = std::fs::remove_file(p);
+pub fn plan(meaning: &MeaningGraph, data: &DamonData) -> Result<Plan, String> {
+    semantics::validate(meaning, data)?;
+    let mut actions = Vec::new();
+    let mut indexes = vec![None; meaning.nodes.len()];
+    for (index, node) in meaning.nodes.iter().enumerate() {
+        if node.kind == crate::graph::NodeKind::Action {
+            indexes[index] = Some(actions.len());
+            let edge = meaning
+                .edges
+                .iter()
+                .find(|e| e.source == index as u32 && e.relation == Relation::Target as u16)
+                .ok_or("action target missing")?;
+            let target = crate::types::EntityId(meaning.nodes[edge.target as usize].value);
+            actions.push(tools::action_for(
+                crate::types::IntentId(node.value),
+                target,
+                data,
+            )?);
+        }
     }
+    let mut dependencies = Vec::new();
+    for edge in &meaning.edges {
+        if edge.relation == Relation::Dependency as u16
+            || edge.relation == Relation::Condition as u16
+        {
+            dependencies.push(Dependency {
+                step: indexes[edge.source as usize].ok_or("invalid dependent action")?,
+                previous: indexes[edge.target as usize].ok_or("invalid prerequisite action")?,
+                success_required: edge.relation == Relation::Condition as u16,
+            });
+        }
+    }
+    Ok(Plan {
+        actions,
+        dependencies,
+    })
+}
+pub fn resolve(meaning: &MeaningGraph, data: &DamonData) -> Result<Action, String> {
+    let p = plan(meaning, data)?;
+    if p.actions.len() != 1 {
+        return Err("composite meaning requires a plan".into());
+    }
+    p.actions
+        .into_iter()
+        .next()
+        .ok_or_else(|| "empty plan".into())
 }

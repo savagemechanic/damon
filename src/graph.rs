@@ -50,6 +50,37 @@ impl CandidateGraph {
                 to: 1,
             });
         }
+        let concept = match intent.0 {
+            1 => 4,
+            2 => 3,
+            3 => 1,
+            4 | 5 => 2,
+            _ => 0,
+        };
+        if concept != 0 {
+            let to = nodes.len() as u16;
+            nodes.push(Node {
+                kind: NodeKind::Concept,
+                value: concept,
+            });
+            edges.push(Edge {
+                from: 0,
+                relation: crate::semantics::Relation::Object as u16,
+                to,
+            });
+        }
+        if intent.0 == 5 {
+            let to = nodes.len() as u16;
+            nodes.push(Node {
+                kind: NodeKind::Time,
+                value: 1,
+            });
+            edges.push(Edge {
+                from: 0,
+                relation: crate::semantics::Relation::Time as u16,
+                to,
+            });
+        }
         Self {
             intent,
             target,

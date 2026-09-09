@@ -4,6 +4,11 @@ use crate::types::{IntentId, MeaningGraph};
 pub fn observe_verified(data: &mut DamonData, feature: u64, meaning: &MeaningGraph, success: bool) {
     let reward = if success { 1 } else { -1 };
     data.observe_language(feature, meaning.intent, reward, meaning.confidence);
+    if success {
+        data.remember_meaning(feature, meaning);
+    } else {
+        data.learned_graphs.remove(&feature);
+    }
 }
 
 pub fn posterior(counts: &[(IntentId, u32)]) -> Vec<(IntentId, u16)> {

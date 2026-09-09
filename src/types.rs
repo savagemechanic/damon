@@ -36,6 +36,7 @@ pub struct MeaningEdge {
 pub struct MeaningGraph {
     pub intent: IntentId,
     pub target: Option<EntityId>,
+    pub nodes: Vec<crate::graph::Node>,
     pub edges: Vec<MeaningEdge>,
     pub confidence: u8,
 }

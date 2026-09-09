@@ -82,3 +82,15 @@ refuses existing destinations. Restore validates the entire backup before
 committing replacement state, keeps generations increasing, and retains the
 previous checkpoint. Backup parent directories must exist. These operations
 are parsed locally; no model sees memory contents or chooses backup paths.
+
+## Payload revision 2: learned graphs
+
+New snapshots use payload magic `DAMON\0\x02\0` with the same base fields as
+revision 1, then a u32 learned graph count (maximum 4,096). Each graph is u64
+phrase hash, u8 confidence, u32 node count (maximum 32), nodes (u8 kind, u32
+value), u32 edge count (maximum 64), edges (u32 source index, u16 relation, u32
+target index). Node tags are 0 action, 1 entity, 2 concept, 3 time, 4 condition;
+unsupported semantic combinations are rejected. Graph summary intent/target
+are derived, not redundantly persisted. Graph rows serialize by ascending hash.
+Revision 1 payloads, including those inside v2 envelopes, remain readable and
+migrate on the next save. See [semantic validation](semantic-engine.md).

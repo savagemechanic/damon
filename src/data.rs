@@ -5,7 +5,8 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-const MAGIC: &[u8; 8] = b"DAMON\0\x01\0";
+const MAGIC: &[u8; 8] = b"DAMON\0\x02\0";
+const LEGACY: &[u8; 8] = b"DAMON\0\x01\0";
 
 #[derive(Debug, Clone)]
 pub struct Entity {
@@ -30,6 +31,7 @@ pub struct DamonData {
     pub names: HashMap<String, EntityId>,
     pub language_counts: HashMap<u64, Vec<(IntentId, u32)>>,
     pub experiences: Vec<Experience>,
+    pub learned_graphs: HashMap<u64, crate::types::MeaningGraph>,
 }
 
 impl DamonData {
@@ -54,6 +56,7 @@ impl DamonData {
             names: HashMap::new(),
             language_counts: HashMap::new(),
             experiences: Vec::new(),
+            learned_graphs: HashMap::new(),
         }
     }
     pub fn generation(&self) -> u64 {
@@ -124,6 +127,14 @@ impl DamonData {
         if self.experiences.len() > 4096 {
             self.experiences.drain(..1024);
         }
+    }
+    pub fn remember_meaning(&mut self, feature: u64, meaning: &crate::types::MeaningGraph) {
+        if self.learned_graphs.len() >= 4096 && !self.learned_graphs.contains_key(&feature) {
+            if let Some(key) = self.learned_graphs.keys().min().copied() {
+                self.learned_graphs.remove(&key);
+            }
+        }
+        self.learned_graphs.insert(feature, meaning.clone());
     }
     pub fn language_candidates(&self, feature: u64) -> &[(IntentId, u32)] {
         self.language_counts
@@ -200,6 +211,32 @@ impl DamonData {
             write_i16(&mut f, x.reward)?;
             f.write_all(&[x.confidence])?;
         }
+        write_u32(&mut f, self.learned_graphs.len() as u32)?;
+        let mut graphs = self.learned_graphs.iter().collect::<Vec<_>>();
+        graphs.sort_by_key(|(key, _)| **key);
+        for (key, meaning) in graphs {
+            crate::semantics::validate(meaning, self).map_err(|e| storage::invalid(&e))?;
+            write_u64(&mut f, *key)?;
+            f.write_all(&[meaning.confidence])?;
+            write_u32(&mut f, meaning.nodes.len() as u32)?;
+            for node in &meaning.nodes {
+                let kind = match node.kind {
+                    crate::graph::NodeKind::Action => 0,
+                    crate::graph::NodeKind::Entity => 1,
+                    crate::graph::NodeKind::Concept => 2,
+                    crate::graph::NodeKind::Time => 3,
+                    crate::graph::NodeKind::Condition => 4,
+                };
+                f.write_all(&[kind])?;
+                write_u32(&mut f, node.value)?;
+            }
+            write_u32(&mut f, meaning.edges.len() as u32)?;
+            for edge in &meaning.edges {
+                write_u32(&mut f, edge.source)?;
+                write_u16(&mut f, edge.relation)?;
+                write_u32(&mut f, edge.target)?;
+            }
+        }
         if f.len() > storage::MAX_IMAGE {
             return Err(storage::invalid("brain image exceeds size limit"));
         }
@@ -207,7 +244,8 @@ impl DamonData {
     }
     fn decode(bytes: &[u8]) -> io::Result<Self> {
         let mut r = Reader { bytes, pos: 0 };
-        if r.take(8)? != MAGIC {
+        let header = r.take(8)?;
+        if header != MAGIC && header != LEGACY {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "invalid damon.data header",
@@ -250,6 +288,53 @@ impl DamonData {
                 reward: r.i16()?,
                 confidence: r.u8()?,
             });
+        }
+        if header == MAGIC {
+            let count = r.u32()?;
+            if count > 4096 {
+                return Err(storage::invalid("too many learned graphs"));
+            }
+            for _ in 0..count {
+                let key = r.u64()?;
+                let confidence = r.u8()?;
+                let count = r.u32()?;
+                if count > 32 {
+                    return Err(storage::invalid("too many graph nodes"));
+                }
+                let mut nodes = Vec::new();
+                for _ in 0..count {
+                    let kind = match r.u8()? {
+                        0 => crate::graph::NodeKind::Action,
+                        1 => crate::graph::NodeKind::Entity,
+                        2 => crate::graph::NodeKind::Concept,
+                        3 => crate::graph::NodeKind::Time,
+                        4 => crate::graph::NodeKind::Condition,
+                        _ => return Err(storage::invalid("unknown graph node")),
+                    };
+                    nodes.push(crate::graph::Node {
+                        kind,
+                        value: r.u32()?,
+                    });
+                }
+                let count = r.u32()?;
+                if count > 64 {
+                    return Err(storage::invalid("too many graph edges"));
+                }
+                let mut edges = Vec::new();
+                for _ in 0..count {
+                    edges.push(crate::types::MeaningEdge {
+                        source: r.u32()?,
+                        relation: r.u16()?,
+                        target: r.u32()?,
+                    });
+                }
+                let meaning = crate::semantics::from_parts(nodes, edges, confidence)
+                    .map_err(|e| storage::invalid(&e))?;
+                crate::semantics::validate(&meaning, &data).map_err(|e| storage::invalid(&e))?;
+                if data.learned_graphs.insert(key, meaning).is_some() {
+                    return Err(storage::invalid("duplicate learned graph"));
+                }
+            }
         }
         if r.pos != bytes.len() {
             return Err(storage::invalid("trailing payload bytes"));
