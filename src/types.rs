@@ -6,6 +6,8 @@ pub struct IntentId(pub u32);
 pub struct ToolId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ProcedureId(pub u32);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CapabilityId(pub u32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Effects(pub u32);
@@ -42,6 +44,7 @@ pub struct MeaningGraph {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Action {
+    pub capability: CapabilityId,
     pub tool: ToolId,
     pub target: Option<EntityId>,
     pub effects: Effects,

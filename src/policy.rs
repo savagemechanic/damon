@@ -12,6 +12,9 @@ impl Default for Policy {
 }
 impl Policy {
     pub fn check(&self, action: &Action) -> Result<(), String> {
+        if crate::tools::capability_for_tool(action.tool) != Some(action.capability) {
+            return Err("tool is not the registered implementation of this capability".into());
+        }
         let required = crate::tools::required_effects(action.tool)?;
         if action.effects != required {
             return Err("action effects do not match the registered tool".into());

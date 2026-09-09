@@ -1,4 +1,5 @@
 pub mod cache;
+pub mod capability;
 pub mod data;
 pub mod graph;
 pub mod language;

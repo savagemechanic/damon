@@ -24,3 +24,20 @@ is not proof.
 dependencies, provenance, verification state, versions, outcomes, and preference.
 Managed source/build artifacts belong outside the brain. Credentials remain
 opaque references and never enter capability metadata.
+
+## Implemented kernel
+
+Tao now persists compact capability, implementation, and dependency arrays.
+Implementation records carry kind, effect-bearing capability, tool/procedure
+binding, verification state, provenance, and verified outcome counters. Planning
+maps semantic intents to capability IDs and resolves a verified implementation
+before producing a tool action. Policy rejects a tool that is not the registered
+implementation of the declared capability. Native verified implementations beat
+application references, and generated implementations do not resolve merely
+because they compiled.
+
+The initial canonical graph covers current Git/file/test tools and reserves
+fundamental interface, route, neighbor, socket, packet-capture, TCP, and UDP
+capabilities. Alias registration, learned composite instructions, isolated source
+artifact management, rollback, and the full acquisition loop remain subsequent
+work.

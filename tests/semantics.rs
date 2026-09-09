@@ -115,6 +115,7 @@ fn teacher_graph_is_strictly_validated() {
 #[test]
 fn forged_effects_do_not_bypass_policy() {
     let action = Action {
+        capability: damon::capability::RUN_TESTS,
         tool: ToolId(3),
         target: None,
         effects: Effects::NONE,

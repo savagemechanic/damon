@@ -6,7 +6,8 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-const MAGIC: &[u8; 8] = b"DAMON\0\x05\0";
+const MAGIC: &[u8; 8] = b"DAMON\0\x06\0";
+const STRATEGY: &[u8; 8] = b"DAMON\0\x05\0";
 const MEMO: &[u8; 8] = b"DAMON\0\x04\0";
 const WORLD: &[u8; 8] = b"DAMON\0\x03\0";
 const GRAPHS: &[u8; 8] = b"DAMON\0\x02\0";
@@ -39,6 +40,7 @@ pub struct DamonData {
     pub world: crate::world::World,
     pub memo: crate::cache::MemoTable,
     pub strategies: crate::strategy::StrategyTable,
+    pub capabilities: crate::capability::CapabilityGraph,
 }
 
 impl DamonData {
@@ -67,6 +69,7 @@ impl DamonData {
             world: crate::world::World::default(),
             memo: crate::cache::MemoTable::default(),
             strategies: crate::strategy::StrategyTable::default(),
+            capabilities: crate::capability::CapabilityGraph::default(),
         }
     }
     pub fn generation(&self) -> u64 {
@@ -369,6 +372,7 @@ impl DamonData {
         world.encode(&mut f)?;
         self.memo.encode(&mut f)?;
         self.strategies.encode(&mut f)?;
+        self.capabilities.encode(&mut f)?;
         if f.len() > storage::MAX_IMAGE {
             return Err(storage::invalid("brain image exceeds size limit"));
         }
@@ -378,6 +382,7 @@ impl DamonData {
         let mut r = Reader { bytes, pos: 0 };
         let header = r.take(8)?;
         if header != MAGIC
+            && header != STRATEGY
             && header != MEMO
             && header != WORLD
             && header != LEGACY
@@ -426,7 +431,12 @@ impl DamonData {
                 confidence: r.u8()?,
             });
         }
-        if header == MAGIC || header == MEMO || header == WORLD || header == GRAPHS {
+        if header == MAGIC
+            || header == STRATEGY
+            || header == MEMO
+            || header == WORLD
+            || header == GRAPHS
+        {
             let count = r.u32()?;
             if count > 4096 {
                 return Err(storage::invalid("too many learned graphs"));
@@ -473,16 +483,19 @@ impl DamonData {
                 }
             }
         }
-        if header == MAGIC || header == MEMO || header == WORLD {
+        if header == MAGIC || header == STRATEGY || header == MEMO || header == WORLD {
             data.world = crate::world::World::decode(&mut r, data.entities.len())?;
         } else {
             data.world.rebuild(data.entities.len())?;
         }
-        if header == MAGIC || header == MEMO {
+        if header == MAGIC || header == STRATEGY || header == MEMO {
             data.memo = crate::cache::MemoTable::decode(&mut r, &data.entities)?;
         }
-        if header == MAGIC {
+        if header == MAGIC || header == STRATEGY {
             data.strategies = crate::strategy::StrategyTable::decode(&mut r)?;
+        }
+        if header == MAGIC {
+            data.capabilities = crate::capability::CapabilityGraph::decode(&mut r)?;
         }
         for alias in &data.world.aliases {
             if data
@@ -528,12 +541,12 @@ mod tests {
             let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
         }
         let d = DamonData::open(&p).unwrap();
+        let (memo_len, strategy_len, capability_len) = tail_lengths(&d);
         drop(d);
         let image = fs::read(&p).unwrap();
         let (generation, payload, _) = storage::unframe(&image).unwrap();
         assert_eq!(&payload[..8], MAGIC);
-        assert_eq!(&payload[payload.len() - 12..], &[0; 12]);
-        let mut old = payload[..payload.len() - 12].to_vec();
+        let mut old = payload[..payload.len() - memo_len - strategy_len - capability_len].to_vec();
         old[..8].copy_from_slice(WORLD);
         fs::write(&p, storage::frame(generation, &old).unwrap()).unwrap();
 
@@ -557,11 +570,11 @@ mod tests {
             let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
         }
         let d = DamonData::open(&p).unwrap();
+        let (_, strategy_len, capability_len) = tail_lengths(&d);
         drop(d);
         let image = fs::read(&p).unwrap();
         let (generation, payload, _) = storage::unframe(&image).unwrap();
-        assert_eq!(&payload[payload.len() - 4..], &[0; 4]);
-        let mut old = payload[..payload.len() - 4].to_vec();
+        let mut old = payload[..payload.len() - strategy_len - capability_len].to_vec();
         old[..8].copy_from_slice(MEMO);
         fs::write(&p, storage::frame(generation, &old).unwrap()).unwrap();
 
@@ -575,5 +588,48 @@ mod tests {
         for suffix in ["", ".journal", ".prev", ".lock"] {
             let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
         }
+    }
+
+    #[test]
+    fn revision_five_strategy_image_migrates_to_capability_payload() {
+        let p =
+            std::env::temp_dir().join(format!("damon-v5-migration-{}.data", std::process::id()));
+        for suffix in ["", ".journal", ".prev", ".lock"] {
+            let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
+        }
+        let d = DamonData::open(&p).unwrap();
+        let (_, _, capability_len) = tail_lengths(&d);
+        drop(d);
+        let image = fs::read(&p).unwrap();
+        let (generation, payload, _) = storage::unframe(&image).unwrap();
+        let mut old = payload[..payload.len() - capability_len].to_vec();
+        old[..8].copy_from_slice(STRATEGY);
+        fs::write(&p, storage::frame(generation, &old).unwrap()).unwrap();
+
+        let mut migrated = DamonData::open(&p).unwrap();
+        assert_eq!(
+            migrated
+                .capabilities
+                .resolve_tool(crate::capability::RUN_TESTS),
+            Some(crate::types::ToolId(3))
+        );
+        migrated.compact().unwrap();
+        drop(migrated);
+        let image = fs::read(&p).unwrap();
+        let (_, payload, _) = storage::unframe(&image).unwrap();
+        assert_eq!(&payload[..8], MAGIC);
+        for suffix in ["", ".journal", ".prev", ".lock"] {
+            let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
+        }
+    }
+
+    fn tail_lengths(data: &DamonData) -> (usize, usize, usize) {
+        let mut memo = Vec::new();
+        data.memo.encode(&mut memo).unwrap();
+        let mut strategy = Vec::new();
+        data.strategies.encode(&mut strategy).unwrap();
+        let mut capability = Vec::new();
+        data.capabilities.encode(&mut capability).unwrap();
+        (memo.len(), strategy.len(), capability.len())
     }
 }

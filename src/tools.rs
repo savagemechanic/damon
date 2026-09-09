@@ -1,5 +1,4 @@
 use crate::data::DamonData;
-use crate::language::{INTENT_GIT_DIFF, INTENT_GIT_STATUS, INTENT_LIST_FILES, INTENT_RUN_TESTS};
 use crate::types::{Action, Effects, MeaningGraph, ToolId, ToolResult};
 use std::fs;
 use std::io::{self, Read};
@@ -78,15 +77,14 @@ pub fn action_for(
         .entity(target)
         .filter(|e| e.kind == 1)
         .ok_or("unknown project")?;
-    let tool = match intent {
-        INTENT_GIT_STATUS => TOOL_GIT_STATUS,
-        INTENT_GIT_DIFF => TOOL_GIT_DIFF,
-        INTENT_RUN_TESTS => TOOL_TEST,
-        INTENT_LIST_FILES => TOOL_LIST_FILES,
-        crate::language::INTENT_CHANGED_FILES => ToolId(5),
-        _ => return Err("meaning has no deterministic tool".into()),
-    };
+    let capability =
+        crate::capability::for_intent(intent).ok_or("meaning has no known native capability")?;
+    let tool = data
+        .capabilities
+        .resolve_tool(capability)
+        .ok_or("capability has no verified implementation")?;
     Ok(Action {
+        capability,
         tool,
         target: Some(target),
         effects: required_effects(tool)?,
@@ -99,6 +97,16 @@ pub fn required_effects(tool: ToolId) -> Result<Effects, String> {
         4 => Ok(Effects::READ),
         _ => Err("unknown tool".into()),
     }
+}
+pub fn capability_for_tool(tool: ToolId) -> Option<crate::types::CapabilityId> {
+    Some(match tool {
+        TOOL_GIT_STATUS => crate::capability::GIT_STATUS,
+        TOOL_GIT_DIFF => crate::capability::GIT_DIFF,
+        TOOL_TEST => crate::capability::RUN_TESTS,
+        TOOL_LIST_FILES => crate::capability::LIST_FILES,
+        ToolId(5) => crate::capability::FIND_CHANGED_FILES,
+        _ => return None,
+    })
 }
 pub fn execute(action: &Action, policy: &crate::policy::Policy) -> ToolResult {
     if let Err(e) = policy.check(action) {

@@ -102,6 +102,15 @@ impl Damon {
             }
             let started = Instant::now();
             let result = tools::execute(action, &self.policy);
+            if let Some(implementation) = self.data.capabilities.resolve_index(action.capability) {
+                if let Err(error) = self
+                    .data
+                    .capabilities
+                    .observe(implementation, result.success)
+                {
+                    strategy_errors.push(error.to_string());
+                }
+            }
             if let Err(error) = self.data.strategies.observe(
                 feature,
                 crate::strategy::for_tool(action.tool),
@@ -172,9 +181,10 @@ impl Damon {
         }
         if input.eq_ignore_ascii_case("show memory status") {
             return Some(format!(
-                "Memory generation {}: {} entities, {} learned phrases, {} retained experiences, {} cached computations, and {} learned strategy records.",
+                "Memory generation {}: {} entities, {} capabilities, {} learned phrases, {} retained experiences, {} cached computations, and {} learned strategy records.",
                 self.data.generation(),
                 self.data.entities.len(),
+                self.data.capabilities.capabilities.len(),
                 self.data.language_counts.len(),
                 self.data.experiences.len(),
                 self.data.memo.entries.len(),

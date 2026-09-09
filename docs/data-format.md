@@ -147,3 +147,21 @@ ahead of local models, external free models, clarification, and paid cloud use.
 Statistics rank choices only: they cannot grant permission, create arguments, or
 serve as verification. Revision-4 memo payloads remain readable and acquire an
 empty strategy table when saved.
+
+## Payload revision 6: native capability graph
+
+Payload magic `DAMON\0\x06\0` appends bounded arrays for capabilities,
+capability dependencies, and implementations. A capability has a compact ID,
+canonical name, effects mask, and version. An implementation identifies its
+capability, ordered kind (native through pixels), exactly one tool or procedure,
+verification state, provenance, a dependency slice, and saturating verified
+success/failure counts. Limits are 4,096 capabilities, 8,192 implementations,
+and 16,384 dependency IDs.
+
+Only `Verified` implementations resolve for execution. `Compiled` generated code
+is deliberately insufficient. Resolution prefers native implementations before
+compositions, system/library calls, protocols, generated code, structured
+external interfaces, application references, accessibility, and pixels. This
+ranking does not bypass effects policy or execution verification. Revision-5
+strategy payloads remain readable and receive the canonical built-in capability
+graph on migration.
