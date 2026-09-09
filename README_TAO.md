@@ -68,3 +68,15 @@ Never commit live `damon.data`, journals, backups, or learned personal state.
 Only synthetic format fixtures under `tests/fixtures/` belong in Git.
 See [the data format and recovery guide](docs/data-format.md) for durability
 guarantees, limits, migration, and natural-language backup/restore operations.
+
+Provider attempts have a 30-second timeout and 1 MiB output limit. An invalid
+interpretation falls through to the next enabled route. Each route is tried
+once per request. `DAMON_CLOUD_CALL_LIMIT` bounds paid attempts per runtime
+session (default 1, including failed attempts); the wrapper must enforce any
+provider-specific monetary/token budget. This is a call cap, not a dollar cap.
+Set `DAMON_OLLAMA_MODEL` to an empty value to skip local inference. No paid route
+runs unless explicitly enabled. Tool processes have a 120-second timeout.
+On macOS/Linux each subprocess has its own process group; timeout, completion,
+and excessive output trigger descendant cleanup. This is not a sandbox for
+untrusted project code. Only successful tool results train positive evidence;
+a provider answer alone never does.

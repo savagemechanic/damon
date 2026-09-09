@@ -43,15 +43,7 @@ impl Damon {
                         candidate_to_meaning(best, 170)
                     } else {
                         match self.ask_teacher(input) {
-                            Ok(m) => {
-                                learning::observe_teacher_resolution(
-                                    &mut self.data,
-                                    feature,
-                                    m.intent,
-                                    m.confidence,
-                                );
-                                m
-                            }
+                            Ok(m) => m,
                             Err(e) => return format!("I don't know how to do that yet. {e}"),
                         }
                     }
@@ -60,15 +52,7 @@ impl Damon {
                 }
             }
             Interpretation::Unknown { .. } => match self.ask_teacher(input) {
-                Ok(m) => {
-                    learning::observe_teacher_resolution(
-                        &mut self.data,
-                        feature,
-                        m.intent,
-                        m.confidence,
-                    );
-                    m
-                }
+                Ok(m) => m,
                 Err(e) => return format!("I don't know how to do that yet. {e}"),
             },
         };
@@ -143,7 +127,16 @@ impl Damon {
         let prompt = format!(
             "You are Damon's language teacher. Map the user's English request to exactly one token and output only that token. Allowed tokens: GIT_STATUS, GIT_DIFF, RUN_TESTS, LIST_FILES. If none fit, output UNKNOWN. User: {input}"
         );
-        let response = self.models.infer(&prompt)?;
+        let response = self.models.infer_validated(&prompt, |text| {
+            if matches!(
+                text.trim(),
+                "GIT_STATUS" | "GIT_DIFF" | "RUN_TESTS" | "LIST_FILES"
+            ) {
+                Ok(())
+            } else {
+                Err("teacher returned an unsupported interpretation".into())
+            }
+        })?;
         let token = response.text.trim().lines().next().unwrap_or("").trim();
         let intent = match token {
             "GIT_STATUS" => language::INTENT_GIT_STATUS,

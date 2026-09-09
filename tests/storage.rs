@@ -240,3 +240,26 @@ fn natural_language_memory_operations_use_real_files() {
         .handle("show memory status")
         .contains("Memory generation"));
 }
+
+#[test]
+fn teacher_answers_are_not_learned_when_execution_fails() {
+    let f = Fixture::new();
+    let mut models = damon::model::ModelRouter::default();
+    models.ollama_model.clear();
+    models.external_command = Some("printf GIT_STATUS".into());
+    models.allow_cloud = false;
+    let mut data = DamonData::open(f.path()).unwrap();
+    data.entities[0].value = f.0.join("not-a-repository").to_string_lossy().into_owned();
+    let mut runtime = damon::Damon {
+        data,
+        models,
+        policy: Default::default(),
+    };
+    let response = runtime.handle("inspect the frobnicator");
+    assert!(response.contains("failed"));
+    assert!(runtime
+        .data
+        .language_candidates(damon::language::feature_hash("inspect the frobnicator"))
+        .is_empty());
+    assert_eq!(runtime.data.experiences.last().unwrap().reward, -1);
+}

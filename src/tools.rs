@@ -2,7 +2,7 @@ use crate::data::DamonData;
 use crate::language::{INTENT_GIT_DIFF, INTENT_GIT_STATUS, INTENT_LIST_FILES, INTENT_RUN_TESTS};
 use crate::types::{Action, Effects, MeaningGraph, ToolId, ToolResult};
 use std::path::Path;
-use std::process::Command;
+use std::time::Duration;
 
 pub const TOOL_GIT_STATUS: ToolId = ToolId(1);
 pub const TOOL_GIT_DIFF: ToolId = ToolId(2);
@@ -56,21 +56,15 @@ pub fn execute(action: &Action) -> ToolResult {
     }
 }
 fn run(cwd: &str, program: &str, args: &[&str]) -> ToolResult {
-    match Command::new(program).args(args).current_dir(cwd).output() {
-        Ok(out) => ToolResult {
-            success: out.status.success(),
-            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-            code: out.status.code(),
-        },
-        Err(e) => ToolResult {
-            success: false,
-            stdout: String::new(),
-            stderr: e.to_string(),
-            code: None,
-        },
-    }
+    crate::process::run(
+        Path::new(cwd),
+        program,
+        args,
+        None,
+        Duration::from_secs(120),
+    )
 }
+
 fn run_tests(cwd: &str) -> ToolResult {
     let p = Path::new(cwd);
     if p.join("Cargo.toml").exists() {
@@ -93,7 +87,18 @@ fn list_files(cwd: &str) -> ToolResult {
     let mut names = Vec::new();
     match std::fs::read_dir(cwd) {
         Ok(rd) => {
-            for entry in rd.flatten().take(200) {
+            for entry in rd.take(200) {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(e) => {
+                        return ToolResult {
+                            success: false,
+                            stdout: String::new(),
+                            stderr: e.to_string(),
+                            code: None,
+                        }
+                    }
+                };
                 names.push(entry.file_name().to_string_lossy().to_string());
             }
             names.sort();
