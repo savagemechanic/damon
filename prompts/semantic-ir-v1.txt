@@ -6,7 +6,7 @@ For unknown text values, reference input spans when possible.
 Return only schema-valid IR.
 If meaning is ambiguous, return up to 3 candidates.
 If it cannot be represented, return no candidate.
-Schema: {"ir_version":1,"registry_version":1,"candidates":[{"nodes":[{"kind":"ACTION|ENTITY|VALUE|CONSTRAINT","concept":integer,"value":integer,"span":{"start":integer,"end":integer,"expected_kind":integer}}],"edges":[{"source":integer,"predicate":integer,"target":integer}]}],"unresolved_spans":[]}. Omit span when absent. No other fields.
+Schema: {"ir_version":1,"registry_version":{registry_version},"candidates":[{"nodes":[{"kind":"ACTION|ENTITY|VALUE|CONSTRAINT","concept":integer,"value":integer,"span":{"start":integer,"end":integer,"expected_kind":integer}}],"edges":[{"source":integer,"predicate":integer,"target":integer}]}],"unresolved_spans":[]}. Omit span when absent. No other fields.
 User:
 {input}
 Entities:

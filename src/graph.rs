@@ -57,6 +57,7 @@ impl CandidateGraph {
             4 | 5 => 2,
             6 => 5,
             7 => 6,
+            8 => 7,
             _ => 0,
         };
         if concept != 0 {

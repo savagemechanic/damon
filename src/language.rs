@@ -12,6 +12,7 @@ pub const INTENT_LIST_FILES: IntentId = IntentId(4);
 pub const INTENT_CHANGED_FILES: IntentId = IntentId(5);
 pub const INTENT_NETWORK_INTERFACES: IntentId = IntentId(6);
 pub const INTENT_DEFAULT_GATEWAY: IntentId = IntentId(7);
+pub const INTENT_NETWORK_NEIGHBORS: IntentId = IntentId(8);
 const BEAM_WIDTH: usize = 4;
 
 #[derive(Debug)]
@@ -96,6 +97,14 @@ fn lexical_evidence(text: &str, intent: IntentId) -> i32 {
             if text.contains("default gateway")
                 || text.contains("how does traffic leave")
                 || text.contains("how traffic leaves") =>
+        {
+            160
+        }
+        INTENT_NETWORK_NEIGHBORS
+            if text.contains("network neighbors")
+                || text.contains("devices my mac")
+                || text.contains("devices this mac")
+                || text.contains("devices the mac") =>
         {
             160
         }
@@ -447,6 +456,7 @@ fn understand_single(input: &str, data: &DamonData) -> Interpretation {
         INTENT_CHANGED_FILES,
         INTENT_NETWORK_INTERFACES,
         INTENT_DEFAULT_GATEWAY,
+        INTENT_NETWORK_NEIGHBORS,
     ] {
         let evidence = lexical_evidence(&text, intent);
         let prior = learned
@@ -455,7 +465,10 @@ fn understand_single(input: &str, data: &DamonData) -> Interpretation {
             .map(|(_, count)| count.saturating_add(1))
             .unwrap_or(1);
         if evidence > 0 {
-            let target = if matches!(intent, INTENT_NETWORK_INTERFACES | INTENT_DEFAULT_GATEWAY) {
+            let target = if matches!(
+                intent,
+                INTENT_NETWORK_INTERFACES | INTENT_DEFAULT_GATEWAY | INTENT_NETWORK_NEIGHBORS
+            ) {
                 data.resolve("local host").filter(|id| {
                     data.entity(*id)
                         .is_some_and(|entity| entity.kind == crate::world::HOST)

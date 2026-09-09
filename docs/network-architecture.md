@@ -30,6 +30,8 @@ cryptography.
   counters and explicit unknown values where the OS does not expose data yet;
 - structured Linux `/proc/net/route` and bounded macOS routing-table discovery,
   default-gateway selection, and native English questions for interfaces/routes;
+- passive Linux ARP and bounded macOS ARP/IPv6 neighbor-table discovery with
+  address, MAC, interface, state, evidence source, and observation timestamp;
 - byte-owned packets whose parsed layers and payload are offsets/views over one
   original buffer;
 - bounded Ethernet dispatch into ARP, IPv4, IPv6, TCP, UDP, and ICMP metadata;
@@ -68,8 +70,8 @@ configured, and learned relationships with confidence and freshness.
 
 ## Remaining integration order
 
-1. Structured neighbor discovery and macOS Wi-Fi metadata within OS privacy
-   boundaries.
+1. macOS Wi-Fi metadata within OS privacy boundaries and richer IPv6 neighbor
+   state where directly available.
 2. Socket/process inventory and owner resolution.
 3. Explicit bounded packet observation behind policy.
 4. Network graph observations and compact selective persistence.

@@ -11,6 +11,7 @@ pub const TOOL_TEST: ToolId = ToolId(3);
 pub const TOOL_LIST_FILES: ToolId = ToolId(4);
 pub const TOOL_NETWORK_INTERFACES: ToolId = ToolId(6);
 pub const TOOL_NETWORK_ROUTES: ToolId = ToolId(7);
+pub const TOOL_NETWORK_NEIGHBORS: ToolId = ToolId(8);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandSpec {
@@ -88,7 +89,9 @@ pub fn action_for(
         {
             vec![entity.value.clone()]
         }
-        TOOL_NETWORK_INTERFACES | TOOL_NETWORK_ROUTES if entity.kind == crate::world::HOST => {
+        TOOL_NETWORK_INTERFACES | TOOL_NETWORK_ROUTES | TOOL_NETWORK_NEIGHBORS
+            if entity.kind == crate::world::HOST =>
+        {
             Vec::new()
         }
         _ => return Err("capability target kind is incompatible with implementation".into()),
@@ -107,6 +110,7 @@ pub fn required_effects(tool: ToolId) -> Result<Effects, String> {
         4 => Ok(Effects::READ),
         6 => Ok(Effects::READ),
         7 => Ok(Effects::READ.union(Effects::PROCESS)),
+        8 => Ok(Effects::READ.union(Effects::PROCESS)),
         _ => Err("unknown tool".into()),
     }
 }
@@ -119,6 +123,7 @@ pub fn capability_for_tool(tool: ToolId) -> Option<crate::types::CapabilityId> {
         ToolId(5) => crate::capability::FIND_CHANGED_FILES,
         TOOL_NETWORK_INTERFACES => crate::capability::INSPECT_INTERFACES,
         TOOL_NETWORK_ROUTES => crate::capability::INSPECT_ROUTES,
+        TOOL_NETWORK_NEIGHBORS => crate::capability::INSPECT_NEIGHBORS,
         _ => return None,
     })
 }
@@ -144,6 +149,7 @@ pub fn execute(action: &Action, policy: &crate::policy::Policy) -> ToolResult {
         ToolId(5) => changed_files(cwd),
         TOOL_NETWORK_INTERFACES => inspect_interfaces(),
         TOOL_NETWORK_ROUTES => inspect_routes(),
+        TOOL_NETWORK_NEIGHBORS => inspect_neighbors(),
         _ => ToolResult {
             success: false,
             stdout: String::new(),
@@ -234,6 +240,48 @@ fn inspect_routes() -> ToolResult {
             }
         }
         Err(error) => tool_error("Routing-table discovery failed", error),
+    }
+}
+
+fn inspect_neighbors() -> ToolResult {
+    match crate::network::neighbor::discover() {
+        Ok(neighbors) => {
+            let interfaces = crate::network::interface::discover().unwrap_or_default();
+            let lines = neighbors
+                .iter()
+                .map(|neighbor| {
+                    let interface = neighbor
+                        .interface
+                        .and_then(|id| {
+                            interfaces
+                                .iter()
+                                .find(|interface| interface.id == id)
+                                .map(|interface| interface.name.clone())
+                        })
+                        .unwrap_or_else(|| "an unknown interface".into());
+                    let mac = neighbor.mac.map_or_else(
+                        || "MAC not observed".to_string(),
+                        |mac| format!("MAC {mac}"),
+                    );
+                    let state = format!("{:?}", neighbor.state).to_ascii_lowercase();
+                    format!(
+                        "{} was observed on {interface} ({mac}, state {state}).",
+                        neighbor.address
+                    )
+                })
+                .collect::<Vec<_>>();
+            ToolResult {
+                success: true,
+                stdout: if lines.is_empty() {
+                    "The operating system currently has no observed network neighbors.".into()
+                } else {
+                    lines.join("\n")
+                },
+                stderr: String::new(),
+                code: Some(0),
+            }
+        }
+        Err(error) => tool_error("Neighbor-table discovery failed", error),
     }
 }
 

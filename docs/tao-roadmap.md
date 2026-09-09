@@ -32,8 +32,8 @@ Delivered milestones:
 - Structured execution ResultIR and deterministic English rendering; models state
   meaning only while capability resolution, policy, execution, and verification
   remain Damon-owned.
-- Native interface and routing-table discovery exposed through semantic network
-  questions and verified capabilities on Linux and macOS.
+- Native interface, routing-table, and passive neighbor discovery exposed through
+  semantic network questions and verified capabilities on Linux and macOS.
 
 Remaining implementation priorities:
 

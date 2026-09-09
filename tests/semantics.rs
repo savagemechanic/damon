@@ -100,6 +100,12 @@ fn network_questions_resolve_to_native_host_capabilities() {
             damon::tools::TOOL_NETWORK_ROUTES,
             damon::capability::INSPECT_ROUTES,
         ),
+        (
+            "Show me the devices my Mac currently knows about.",
+            language::INTENT_NETWORK_NEIGHBORS,
+            damon::tools::TOOL_NETWORK_NEIGHBORS,
+            damon::capability::INSPECT_NEIGHBORS,
+        ),
     ] {
         let Interpretation::Resolved(meaning) = language::understand(request, &d) else {
             panic!("network question was not resolved")
@@ -196,7 +202,7 @@ fn successful_teacher_graph_is_reused_with_providers_disabled() {
     models.ollama_model.clear();
     models.allow_cloud = false;
     models.external_command = Some(
-        "printf '%s' '{\"ir_version\":1,\"registry_version\":1,\"candidates\":[{\"nodes\":[{\"kind\":\"ACTION\",\"concept\":16777220,\"value\":0},{\"kind\":\"ENTITY\",\"concept\":67108865,\"value\":0}],\"edges\":[{\"source\":0,\"predicate\":33554433,\"target\":1}]}],\"unresolved_spans\":[]}'".into(),
+        "printf '%s' '{\"ir_version\":1,\"registry_version\":2,\"candidates\":[{\"nodes\":[{\"kind\":\"ACTION\",\"concept\":16777220,\"value\":0},{\"kind\":\"ENTITY\",\"concept\":67108865,\"value\":0}],\"edges\":[{\"source\":0,\"predicate\":33554433,\"target\":1}]}],\"unresolved_spans\":[]}'".into(),
     );
     let mut runtime = damon::Damon {
         data: f.data(),

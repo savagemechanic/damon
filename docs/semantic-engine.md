@@ -26,7 +26,7 @@ at most three candidates. The stable registry reserves high-byte namespaces:
 | `0x05` | operator |
 | `0x06` | value type |
 
-Registry version 1 includes coding and network meanings plus `COPY`, `FIND`,
+Registry version 2 includes coding and network meanings plus `COPY`, `FIND`,
 `TARGET`, `OBJECT`, `SOURCE`, `DESTINATION`, `TIME`, `AFTER`, `ON_SUCCESS`,
 `ON_FAILURE`, `REQUIRES`, size/greater-than, bytes, and the required entity
 kinds. IDs are permanent; names are metadata.

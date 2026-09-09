@@ -151,8 +151,8 @@ impl CapabilityGraph {
             (
                 INSPECT_NEIGHBORS,
                 "inspect network neighbors",
-                Effects::READ,
-                None,
+                Effects::READ.union(Effects::PROCESS),
+                Some(ToolId(8)),
             ),
             (
                 LIST_SOCKETS,
@@ -233,6 +233,11 @@ impl CapabilityGraph {
             (
                 INSPECT_ROUTES,
                 ToolId(7),
+                Effects::READ.union(Effects::PROCESS),
+            ),
+            (
+                INSPECT_NEIGHBORS,
+                ToolId(8),
                 Effects::READ.union(Effects::PROCESS),
             ),
         ] {
@@ -441,6 +446,7 @@ pub fn for_intent(intent: crate::types::IntentId) -> Option<CapabilityId> {
         5 => FIND_CHANGED_FILES,
         6 => INSPECT_INTERFACES,
         7 => INSPECT_ROUTES,
+        8 => INSPECT_NEIGHBORS,
         _ => return None,
     })
 }
@@ -510,7 +516,7 @@ mod tests {
         graph
             .add_implementation(
                 NewImplementation {
-                    capability: INSPECT_NEIGHBORS,
+                    capability: LIST_SOCKETS,
                     kind: ImplementationKind::Generated,
                     tool: Some(ToolId(100)),
                     procedure: None,
@@ -520,6 +526,6 @@ mod tests {
                 &[],
             )
             .unwrap();
-        assert!(graph.resolve(INSPECT_NEIGHBORS).is_none());
+        assert!(graph.resolve(LIST_SOCKETS).is_none());
     }
 }

@@ -38,7 +38,8 @@ impl Drop for Fixture {
 
 fn run_tests_json(entity_slot: u16) -> String {
     format!(
-        "{{\"ir_version\":1,\"registry_version\":1,\"candidates\":[{{\"nodes\":[{{\"kind\":\"ACTION\",\"concept\":{},\"value\":0}},{{\"kind\":\"ENTITY\",\"concept\":{},\"value\":{entity_slot}}}],\"edges\":[{{\"source\":0,\"predicate\":{},\"target\":1}}]}}],\"unresolved_spans\":[]}}",
+        "{{\"ir_version\":1,\"registry_version\":{},\"candidates\":[{{\"nodes\":[{{\"kind\":\"ACTION\",\"concept\":{},\"value\":0}},{{\"kind\":\"ENTITY\",\"concept\":{},\"value\":{entity_slot}}}],\"edges\":[{{\"source\":0,\"predicate\":{},\"target\":1}}]}}],\"unresolved_spans\":[]}}",
+        registry::VERSION,
         registry::RUN_TESTS.0,
         registry::PROJECT.0,
         registry::TARGET.0,
@@ -75,7 +76,8 @@ fn strict_json_rejects_schema_concepts_slots_edges_and_missing_arguments() {
     assert!(semantic_ir::parse_json(&invalid_edge, &request).is_err());
 
     let missing = format!(
-        "{{\"ir_version\":1,\"registry_version\":1,\"candidates\":[{{\"nodes\":[{{\"kind\":\"ACTION\",\"concept\":{},\"value\":0}}],\"edges\":[]}}],\"unresolved_spans\":[]}}",
+        "{{\"ir_version\":1,\"registry_version\":{},\"candidates\":[{{\"nodes\":[{{\"kind\":\"ACTION\",\"concept\":{},\"value\":0}}],\"edges\":[]}}],\"unresolved_spans\":[]}}",
+        registry::VERSION,
         registry::RUN_TESTS.0
     );
     assert!(semantic_ir::parse_json(&missing, &request).is_err());
@@ -198,7 +200,7 @@ fn multiple_valid_model_candidates_remain_ambiguous() {
     let one = object["candidates"][0].clone();
     let json = serde_json::json!({
         "ir_version": 1,
-        "registry_version": 1,
+        "registry_version": registry::VERSION,
         "candidates": [one.clone(), one],
         "unresolved_spans": []
     })
@@ -233,7 +235,7 @@ fn damon_ranks_candidates_from_context_not_model_confidence() {
     };
     let json = serde_json::json!({
         "ir_version": 1,
-        "registry_version": 1,
+        "registry_version": registry::VERSION,
         "candidates": [candidate(registry::SHOW_DIFF.0), candidate(registry::RUN_TESTS.0)],
         "unresolved_spans": []
     })

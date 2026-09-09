@@ -4,6 +4,7 @@
 pub mod address;
 pub mod connection;
 pub mod interface;
+pub mod neighbor;
 pub mod packet;
 pub mod route;
 pub mod socket;

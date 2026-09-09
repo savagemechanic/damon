@@ -297,6 +297,7 @@ pub fn bind(
             4 | 5 => 2,
             6 => 5,
             7 => 6,
+            8 => 7,
             _ => continue,
         };
         let target = nodes.len() as u32;
@@ -416,6 +417,7 @@ pub fn request(input: &str, data: &DamonData) -> SemanticRequest {
         (registry::FIND_CHANGED_FILES, ["yesterday", "modified"]),
         (registry::INSPECT_INTERFACES, ["network", "connected"]),
         (registry::INSPECT_ROUTES, ["gateway", "traffic"]),
+        (registry::INSPECT_NEIGHBORS, ["devices", "neighbors"]),
         (registry::COPY, ["copy", "duplicate"]),
         (registry::FIND, ["find", "larger"]),
     ];
@@ -880,7 +882,9 @@ fn validate_requirements(ir: &CandidateIr) -> Result<(), String> {
             action
                 if matches!(
                     action,
-                    registry::INSPECT_INTERFACES | registry::INSPECT_ROUTES
+                    registry::INSPECT_INTERFACES
+                        | registry::INSPECT_ROUTES
+                        | registry::INSPECT_NEIGHBORS
                 ) && target_kind(registry::TARGET) != Some(registry::HOST) =>
             {
                 return Err("network action target must be a host".into())
@@ -1254,6 +1258,7 @@ pub fn prompt(request: &SemanticRequest, compact: bool) -> String {
         .collect::<Vec<_>>()
         .join(",");
     template
+        .replace("{registry_version}", &request.registry_version.to_string())
         .replace("{entities}", &entities)
         .replace(
             "{concepts}",

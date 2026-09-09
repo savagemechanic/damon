@@ -175,6 +175,8 @@ change meaning. Revision 6 remains readable. On migration Damon restores missing
 built-in local-host/Desktop entities and verified native interface/route
 implementations, then writes revision 7 on the next save or compaction.
 
+Registry version 2 adds the stable passive-neighbor action ID without changing IR
+version 1; older registry metadata migrates forward because IDs are never recycled.
 Model-facing entity slots and source spans are request-local and are never stored
 as persistent-ID authority. Canonical IR uses deterministic CBOR for hashing and
 interchange; `damon.data` continues to store learned bound graph templates and

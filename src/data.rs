@@ -543,10 +543,13 @@ impl DamonData {
             data.capabilities = crate::capability::CapabilityGraph::decode(&mut r)?;
         }
         if header == MAGIC {
-            data.semantic_registry_version = r.u16()?;
-            if data.semantic_registry_version != crate::semantic_registry::VERSION {
+            let stored_registry_version = r.u16()?;
+            if stored_registry_version == 0
+                || stored_registry_version > crate::semantic_registry::VERSION
+            {
                 return Err(storage::invalid("unsupported semantic registry version"));
             }
+            data.semantic_registry_version = crate::semantic_registry::VERSION;
         }
         for alias in &data.world.aliases {
             if data
@@ -689,7 +692,9 @@ mod tests {
         d.capabilities.implementations.retain(|implementation| {
             !matches!(
                 implementation.capability,
-                crate::capability::INSPECT_INTERFACES | crate::capability::INSPECT_ROUTES
+                crate::capability::INSPECT_INTERFACES
+                    | crate::capability::INSPECT_ROUTES
+                    | crate::capability::INSPECT_NEIGHBORS
             )
         });
         d.capabilities
@@ -717,6 +722,12 @@ mod tests {
                 .capabilities
                 .resolve_tool(crate::capability::INSPECT_ROUTES),
             Some(crate::types::ToolId(7))
+        );
+        assert_eq!(
+            migrated
+                .capabilities
+                .resolve_tool(crate::capability::INSPECT_NEIGHBORS),
+            Some(crate::types::ToolId(8))
         );
         migrated.compact().unwrap();
         drop(migrated);

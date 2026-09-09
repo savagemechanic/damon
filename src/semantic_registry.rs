@@ -2,7 +2,7 @@
 //! the integer identity is the contract and IDs are never recycled.
 use crate::types::ConceptId;
 
-pub const VERSION: u16 = 1;
+pub const VERSION: u16 = 2;
 const LOCAL_MASK: u32 = 0x00ff_ffff;
 
 pub const ACTION_NAMESPACE: u32 = 0x0100_0000;
@@ -21,6 +21,7 @@ pub const INSPECT_INTERFACES: ConceptId = ConceptId(ACTION_NAMESPACE | 6);
 pub const INSPECT_ROUTES: ConceptId = ConceptId(ACTION_NAMESPACE | 7);
 pub const COPY: ConceptId = ConceptId(ACTION_NAMESPACE | 8);
 pub const FIND: ConceptId = ConceptId(ACTION_NAMESPACE | 9);
+pub const INSPECT_NEIGHBORS: ConceptId = ConceptId(ACTION_NAMESPACE | 10);
 
 pub const TARGET: ConceptId = ConceptId(PREDICATE_NAMESPACE | 1);
 pub const OBJECT: ConceptId = ConceptId(PREDICATE_NAMESPACE | 2);
@@ -65,6 +66,7 @@ pub fn name(id: ConceptId) -> Option<&'static str> {
         INSPECT_ROUTES => "INSPECT_ROUTES",
         COPY => "COPY",
         FIND => "FIND",
+        INSPECT_NEIGHBORS => "INSPECT_NEIGHBORS",
         TARGET => "TARGET",
         OBJECT => "OBJECT",
         SOURCE => "SOURCE",
@@ -89,14 +91,32 @@ pub fn name(id: ConceptId) -> Option<&'static str> {
 }
 
 pub fn action_to_intent(id: ConceptId) -> Option<crate::types::IntentId> {
-    (namespace(id) == ACTION_NAMESPACE && (1..=9).contains(&(id.0 & LOCAL_MASK)))
-        .then_some(crate::types::IntentId(id.0 & LOCAL_MASK))
+    Some(match id {
+        GIT_STATUS => crate::types::IntentId(1),
+        SHOW_DIFF => crate::types::IntentId(2),
+        RUN_TESTS => crate::types::IntentId(3),
+        LIST_FILES => crate::types::IntentId(4),
+        FIND_CHANGED_FILES => crate::types::IntentId(5),
+        INSPECT_INTERFACES => crate::types::IntentId(6),
+        INSPECT_ROUTES => crate::types::IntentId(7),
+        INSPECT_NEIGHBORS => crate::types::IntentId(8),
+        COPY | FIND => return None,
+        _ => return None,
+    })
 }
 
 pub fn intent_to_action(id: crate::types::IntentId) -> Option<ConceptId> {
-    (1..=9)
-        .contains(&id.0)
-        .then_some(ConceptId(ACTION_NAMESPACE | id.0))
+    Some(match id.0 {
+        1 => GIT_STATUS,
+        2 => SHOW_DIFF,
+        3 => RUN_TESTS,
+        4 => LIST_FILES,
+        5 => FIND_CHANGED_FILES,
+        6 => INSPECT_INTERFACES,
+        7 => INSPECT_ROUTES,
+        8 => INSPECT_NEIGHBORS,
+        _ => return None,
+    })
 }
 
 pub fn entity_kind(kind: u16) -> Option<ConceptId> {

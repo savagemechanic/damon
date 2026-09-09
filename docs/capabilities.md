@@ -38,7 +38,7 @@ because they compiled.
 
 The initial canonical graph covers current Git/file/test tools and reserves
 fundamental interface, route, neighbor, socket, packet-capture, TCP, and UDP
-capabilities. Interface and route capabilities now resolve to verified native
+capabilities. Interface, route, and passive neighbor capabilities now resolve to verified native
 tools; the canonical semantic IR never sees those tool bindings. Alias registration,
 learned composite instructions, isolated source
 artifact management, rollback, and the full acquisition loop remain subsequent

@@ -27,7 +27,7 @@ fn capability_graph_and_provenance_survive_reopen() {
         .capabilities
         .add_implementation(
             NewImplementation {
-                capability: capability::INSPECT_NEIGHBORS,
+                capability: capability::LIST_SOCKETS,
                 kind: ImplementationKind::ApplicationReference,
                 tool: Some(ToolId(900)),
                 procedure: None,
@@ -42,10 +42,7 @@ fn capability_graph_and_provenance_survive_reopen() {
     drop(data);
 
     let data = DamonData::open(&path).unwrap();
-    let implementation = data
-        .capabilities
-        .resolve(capability::INSPECT_NEIGHBORS)
-        .unwrap();
+    let implementation = data.capabilities.resolve(capability::LIST_SOCKETS).unwrap();
     assert_eq!(
         implementation.kind,
         ImplementationKind::ApplicationReference
