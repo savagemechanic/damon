@@ -6,6 +6,23 @@ pub fn observe_verified(data: &mut DamonData, feature: u64, meaning: &MeaningGra
     data.observe_language(feature, meaning.intent, reward, meaning.confidence);
     if success {
         data.remember_meaning(feature, meaning);
+        if let Some((index, node)) = meaning
+            .nodes
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, n)| n.kind == crate::graph::NodeKind::Action)
+        {
+            if let Some(edge) = meaning.edges.iter().find(|e| {
+                e.source == index as u32 && e.relation == crate::semantics::Relation::Target as u16
+            }) {
+                data.world.context.observe(
+                    crate::types::EntityId(meaning.nodes[edge.target as usize].value),
+                    IntentId(node.value),
+                    feature,
+                );
+            }
+        }
     } else {
         data.learned_graphs.remove(&feature);
     }

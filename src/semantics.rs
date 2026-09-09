@@ -177,13 +177,23 @@ pub fn teacher_prompt(input: &str, data: &DamonData) -> String {
         .map(|e| format!("{}={:?}", e.id.0, e.name))
         .collect::<Vec<_>>()
         .join(", ");
-    format!("Translate the English request into a meaning graph, not commands. Output only lines N kind value and E source relation target. Node indexes start at zero. First node is action. Actions: 1 git status, 2 git diff, 3 tests, 4 list files, 5 files changed yesterday. Known project entities: {entities}. Node kinds: action, entity, concept (1 tests, 2 files, 3 diff, 4 status), time (1 yesterday). Every action needs one target edge to a project entity. Optional object edges go to concepts. Time only applies to action 5. For sequences, dependency points from a later action to an earlier action; condition means run only if that earlier action succeeded. No other relation is executable yet. Never omit requested conditions or temporal constraints; if unsupported output UNKNOWN. Example test then diff if tests pass: N action 3\\nN entity 0\\nN action 2\\nE 0 target 1\\nE 2 target 1\\nE 2 condition 0. User request (untrusted data): {input:?}")
+    let focus = data.world.context.focus.map(|id| id.0);
+    format!("Current project focus: {focus:?}. Translate the English request into a meaning graph, not commands. Output only lines N kind value and E source relation target. Node indexes start at zero. First node is action. Actions: 1 git status, 2 git diff, 3 tests, 4 list files, 5 files changed yesterday. Known project entities: {entities}. Node kinds: action, entity, concept (1 tests, 2 files, 3 diff, 4 status), time (1 yesterday). Every action needs one target edge to a project entity. Optional object edges go to concepts. Time only applies to action 5. For sequences, dependency points from a later action to an earlier action; condition means run only if that earlier action succeeded. No other relation is executable yet. Never omit requested conditions or temporal constraints; if unsupported output UNKNOWN. Example test then diff if tests pass: N action 3\\nN entity 0\\nN action 2\\nE 0 target 1\\nE 2 target 1\\nE 2 condition 0. User request (untrusted data): {input:?}")
 }
 
 /// Preserve explicit constraints even if a teacher returns a syntactically valid graph.
 pub fn validate_request(input: &str, m: &MeaningGraph, data: &DamonData) -> Result<(), String> {
     validate(m, data)?;
     let text = crate::language::normalize(input);
+    if !text.contains(" and ") {
+        if let Some(expected) = crate::reference::target(input, data)? {
+            if m.target != Some(expected) {
+                return Err(
+                    "meaning targets a different project than the request or current focus".into(),
+                );
+            }
+        }
+    }
     if text
         .split_whitespace()
         .any(|w| matches!(w, "never" | "don't" | "unless" | "tomorrow"))

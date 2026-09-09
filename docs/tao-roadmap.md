@@ -16,12 +16,14 @@ Delivered milestones:
   plans, real diff/test evidence, yesterday's committed files, and persistent
   exact-graph learning with reuse tested without providers.
 
+- Persistent world kinds, aliases, adjacency relationships, entity versions,
+  project registration, focus, previous action/target, recent references, pronouns,
+  and whole-procedure retargeting with safeguards against stale project binding.
+
 Remaining implementation priorities:
 
-1. Extend array-first persistent world state: project/file/tool/procedure/host/
-   concept relationships, alias lookup, adjacency arrays, conversational focus,
-   previous actions and targets, recent references. Resolve common pronouns and
-   "same thing" without reusing a stale target.
+1. Populate richer file/tool/procedure/process world records from deterministic
+   discovery and extend references from projects to files and operation results.
 2. Expand semantic candidates incrementally across entities and clauses, combine
    lexical/grammar/context/world evidence, calibrate risk-sensitive thresholds,
    and support source/destination/modifier/reference/dependency/result semantics.

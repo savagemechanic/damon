@@ -29,12 +29,16 @@ impl Damon {
     }
 
     pub fn handle(&mut self, input: &str) -> String {
+        if let Some(result) = crate::world_commands::handle(input, &mut self.data) {
+            return result;
+        }
         if let Some(result) = self.maintain_memory(input) {
             return result;
         }
         let feature = language::feature_hash(input);
         let meaning = match language::understand(input, &self.data) {
             Interpretation::Resolved(m) => m,
+            Interpretation::Clarify(message) => return message,
             Interpretation::Ambiguous(beam) => {
                 if let Some(best) = beam.first() {
                     if best.score() - beam.get(1).map(|c| c.score()).unwrap_or(best.score() - 64)

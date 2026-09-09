@@ -52,6 +52,11 @@ graph. At most 4,096 graphs are retained. Reuse still validates the graph and
 passes through the same planner/policy/tool path. Tests prove reuse with model
 providers disabled and graph persistence across reopening the brain.
 
-Pronoun context, richer world relationships, file copy/edit semantics, learned
-procedures, and dependency-aware cached discovery are subsequent implementation
-milestones; they are not claimed by this initial graph boundary.
+Project context resolves it/that/this/its/they/there against the current focus;
+missing context requires clarification. "Same thing" reuses the previous verified
+graph, preserving all steps and conditions while changing a single project binding.
+A prior multi-project procedure requires explicit targets. Unqualified learned
+requests follow current focus; explicitly named targets keep their bindings.
+The second clause inherits the first clause's target unless it names another.
+File copy/edit semantics, learned instruction procedures, and dependency-aware
+cached discovery remain subsequent milestones.

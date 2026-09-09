@@ -17,6 +17,7 @@ pub enum Interpretation {
     Resolved(MeaningGraph),
     Ambiguous(Vec<CandidateGraph>),
     Unknown { feature: u64 },
+    Clarify(String),
 }
 
 pub fn normalize(input: &str) -> String {
@@ -36,7 +37,9 @@ pub fn feature_hash(input: &str) -> u64 {
 fn lexical_evidence(text: &str, intent: IntentId) -> i32 {
     match intent {
         INTENT_RUN_TESTS => {
-            if text.contains("test") {
+            if text.contains("test")
+                || (text.starts_with("check ") && crate::reference::has_reference(text))
+            {
                 96
             } else if text.contains("check the code") || text.starts_with("check ") {
                 36
@@ -95,9 +98,25 @@ pub fn understand(input: &str, data: &DamonData) -> Interpretation {
             feature: feature_hash(input),
         };
     }
+    if text.contains("same thing")
+        || matches!(text.as_str(), "do that again" | "repeat that" | "again")
+    {
+        return match crate::reference::repeat(input, data) {
+            Ok(m) => Interpretation::Resolved(m),
+            Err(e) => Interpretation::Clarify(e),
+        };
+    }
     if let Some(meaning) = data.learned_graphs.get(&feature_hash(input)) {
         if crate::semantics::validate(meaning, data).is_ok() {
-            return Interpretation::Resolved(meaning.clone());
+            let mut meaning = meaning.clone();
+            if crate::reference::project_mentions(input, data).is_empty() {
+                match crate::reference::target(input, data) {
+                    Ok(Some(target)) => meaning = crate::reference::retarget(&meaning, target),
+                    Ok(None) => {}
+                    Err(e) => return Interpretation::Clarify(e),
+                }
+            }
+            return Interpretation::Resolved(meaning);
         }
     }
     if text.len() > 8192 {
@@ -117,44 +136,53 @@ pub fn understand(input: &str, data: &DamonData) -> Interpretation {
                     feature: feature_hash(input),
                 };
             }
-            if let (Interpretation::Resolved(mut a), Interpretation::Resolved(b)) = (
-                understand_single(first, data),
-                understand_single(second, data),
-            ) {
-                let offset = a.nodes.len() as u32;
-                a.nodes.extend(b.nodes);
-                a.edges.extend(b.edges.into_iter().map(|e| MeaningEdge {
-                    source: e.source + offset,
-                    target: e.target + offset,
-                    relation: e.relation,
-                }));
-                a.edges.push(MeaningEdge {
-                    source: offset,
-                    target: 0,
-                    relation: relation as u16,
-                });
-                a.confidence = a.confidence.min(b.confidence);
-                return Interpretation::Resolved(a);
-            }
-            return Interpretation::Unknown {
-                feature: feature_hash(input),
+            let mut a = match understand_single(first, data) {
+                Interpretation::Resolved(m) => m,
+                Interpretation::Clarify(e) => return Interpretation::Clarify(e),
+                _ => {
+                    return Interpretation::Unknown {
+                        feature: feature_hash(input),
+                    }
+                }
             };
+            let mut b = match understand_single(second, data) {
+                Interpretation::Resolved(m) => m,
+                Interpretation::Clarify(e) => return Interpretation::Clarify(e),
+                _ => {
+                    return Interpretation::Unknown {
+                        feature: feature_hash(input),
+                    }
+                }
+            };
+            if crate::reference::project_mentions(second, data).is_empty() {
+                if let Some(target) = a.target {
+                    b = crate::reference::retarget(&b, target);
+                }
+            }
+            let offset = a.nodes.len() as u32;
+            a.nodes.extend(b.nodes);
+            a.edges.extend(b.edges.into_iter().map(|e| MeaningEdge {
+                source: e.source + offset,
+                target: e.target + offset,
+                relation: e.relation,
+            }));
+            a.edges.push(MeaningEdge {
+                source: offset,
+                target: 0,
+                relation: relation as u16,
+            });
+            a.confidence = a.confidence.min(b.confidence);
+            return Interpretation::Resolved(a);
         }
     }
     understand_single(input, data)
 }
 fn understand_single(input: &str, data: &DamonData) -> Interpretation {
     let text = normalize(input);
-    let words: Vec<&str> = text
-        .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
-        .filter(|w| !w.is_empty())
-        .collect();
-    let target = data
-        .entities
-        .iter()
-        .find(|e| words.iter().any(|w| *w == e.name.to_ascii_lowercase()))
-        .map(|e| e.id)
-        .or_else(|| data.resolve("damon"));
+    let target = match crate::reference::target(input, data) {
+        Ok(target) => target,
+        Err(e) => return Interpretation::Clarify(e),
+    };
     let feature = feature_hash(&text);
     let learned = data.language_candidates(feature);
     let mut candidates = Vec::new();

@@ -94,3 +94,22 @@ unsupported semantic combinations are rejected. Graph summary intent/target
 are derived, not redundantly persisted. Graph rows serialize by ascending hash.
 Revision 1 payloads, including those inside v2 envelopes, remain readable and
 migrate on the next save. See [semantic validation](semantic-engine.md).
+
+## Payload revision 3: world and context
+
+Payload magic `DAMON\0\x03\0` appends world state after the revision-2 graphs:
+u64 world version; u32 alias count followed by (string normalized name, u32 entity
+ID); u32 relationship count followed by (u32 source ID, u16 relation, u32 target
+ID); u32 focus, previous target and previous action (u32::MAX means absent);
+u8 previous-feature presence flag and u64 feature; u32 recent-reference count
+followed by u32 entity IDs. Limits are 8,192 aliases, 65,536 links, eight recent
+references. Relationships serialize by source/relation/target. Adjacency offsets
+and hash indexes are derived, validated, and rebuilt on open; no pointers persist.
+
+Entity kinds: 1 project, 2 file, 3 tool, 4 procedure, 5 host, 6 process, 7 concept,
+8 directory. Relationships: 1 contains, 2 uses, 3 runs on, 4 implements, 5 related
+to, 6 produces. Public mutation methods increment versions when values change.
+Alias conflicts and unknown relationship/context endpoints are rejected.
+Both prior payload revisions remain readable. `v2-seed.data` is a synthetic
+checksummed migration fixture. Legacy relative project paths retain their old
+meaning; new project registrations and fresh seeds use canonical absolute paths.

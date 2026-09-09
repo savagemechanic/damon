@@ -30,7 +30,20 @@ restore my memory from "/existing/directory/backup.data"
 exit
 ```
 
-The initial `Damon` project refers to the working directory. Test discovery
+The initial `Damon` project is pinned to the startup directory's absolute path.
+Register and select other projects naturally:
+
+```text
+remember project CPython at "/path/to/cpython"
+remember alias py for CPython
+focus on py
+check it
+do the same thing to Damon
+show my projects
+```
+
+Project aliases, focus, recent references, and the last verified action persist.
+Unknown project names trigger clarification instead of silently selecting Damon. Test discovery
 currently recognizes Cargo, pytest configuration, and npm projects. It executes
 project code; this runtime is not a sandbox. Results come from real process exit
 codes and Git output. Git history can identify yesterday's committed files, but
@@ -71,8 +84,7 @@ The tested kernel has recoverable binary memory, bounded candidate graphs,
 validated teacher graphs, conditional plans, exact-graph learning/reuse, policy
 checks, bounded subprocess lifetimes, and basic coding inspection/testing.
 See [semantic graphs](docs/semantic-engine.md) and the
-[implementation roadmap](docs/tao-roadmap.md) for the remaining work. Context,
-rich file editing, cached discovery, and learned procedures are ongoing work,
+[implementation roadmap](docs/tao-roadmap.md) for the remaining work. Rich file editing, cached discovery, and learned procedures are ongoing work,
 not complete capabilities.
 
 ## Development

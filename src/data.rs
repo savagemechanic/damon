@@ -1,3 +1,4 @@
+use crate::codec::*;
 use crate::storage::{self, Store};
 use crate::types::{EntityId, IntentId};
 use std::collections::HashMap;
@@ -5,7 +6,8 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-const MAGIC: &[u8; 8] = b"DAMON\0\x02\0";
+const MAGIC: &[u8; 8] = b"DAMON\0\x03\0";
+const GRAPHS: &[u8; 8] = b"DAMON\0\x02\0";
 const LEGACY: &[u8; 8] = b"DAMON\0\x01\0";
 
 #[derive(Debug, Clone)]
@@ -32,6 +34,7 @@ pub struct DamonData {
     pub language_counts: HashMap<u64, Vec<(IntentId, u32)>>,
     pub experiences: Vec<Experience>,
     pub learned_graphs: HashMap<u64, crate::types::MeaningGraph>,
+    pub world: crate::world::World,
 }
 
 impl DamonData {
@@ -44,7 +47,7 @@ impl DamonData {
         };
         data.store = Some(store);
         if fresh {
-            data.seed();
+            data.seed()?;
             data.save()?;
         }
         Ok(data)
@@ -57,6 +60,7 @@ impl DamonData {
             language_counts: HashMap::new(),
             experiences: Vec::new(),
             learned_graphs: HashMap::new(),
+            world: crate::world::World::default(),
         }
     }
     pub fn generation(&self) -> u64 {
@@ -65,8 +69,30 @@ impl DamonData {
     pub fn recovery_warnings(&self) -> &[String] {
         self.store.as_ref().map_or(&[], |s| s.warnings.as_slice())
     }
-    fn seed(&mut self) {
-        self.add_entity(1, "damon", ".");
+    fn seed(&mut self) -> io::Result<()> {
+        let cwd = std::env::current_dir()?;
+        self.add_entity(
+            crate::world::PROJECT,
+            "damon",
+            cwd.to_str()
+                .ok_or_else(|| storage::invalid("project path must be UTF-8"))?,
+        );
+        let host = self.add_entity(crate::world::HOST, "local host", "");
+        self.link(EntityId(0), crate::world::Relationship::RunsOn, host)?;
+        for (name, value) in [
+            ("git status tool", "1"),
+            ("git diff tool", "2"),
+            ("test tool", "3"),
+            ("file listing tool", "4"),
+        ] {
+            let tool = self.add_entity(crate::world::TOOL, name, value);
+            self.link(EntityId(0), crate::world::Relationship::Uses, tool)?;
+        }
+        for name in ["tests", "files", "changes"] {
+            self.add_entity(crate::world::CONCEPT, name, "");
+        }
+        self.world.context.focus(EntityId(0));
+        Ok(())
     }
     pub fn add_entity(&mut self, kind: u16, name: &str, value: &str) -> EntityId {
         if let Some(id) = self.names.get(&name.to_ascii_lowercase()) {
@@ -89,6 +115,100 @@ impl DamonData {
     }
     pub fn entity(&self, id: EntityId) -> Option<&Entity> {
         self.entities.get(id.0 as usize)
+    }
+    pub fn register_project(&mut self, name: &str, path: &Path) -> io::Result<EntityId> {
+        let key = name.trim().to_ascii_lowercase();
+        if !crate::world::valid_name(&key) {
+            return Err(storage::invalid(
+                "project name must be 1-128 characters, at most eight words",
+            ));
+        }
+        let path = fs::canonicalize(path)?;
+        if !path.is_dir() {
+            return Err(storage::invalid("project path is not a directory"));
+        }
+        let value = path
+            .to_str()
+            .ok_or_else(|| storage::invalid("project path must be UTF-8"))?;
+        if let Some(id) = self.resolve(&key) {
+            let e = self
+                .entity(id)
+                .ok_or_else(|| storage::invalid("invalid entity"))?;
+            if e.kind != crate::world::PROJECT || e.value != value {
+                return Err(storage::invalid(
+                    "name already identifies a different entity or project path",
+                ));
+            }
+            return Ok(id);
+        }
+        self.world.changed()?;
+        let id = self.add_entity(crate::world::PROJECT, &key, value);
+        self.world.rebuild(self.entities.len())?;
+        Ok(id)
+    }
+    pub fn add_alias(&mut self, name: &str, id: EntityId) -> io::Result<()> {
+        let key = name.trim().to_ascii_lowercase();
+        if !crate::world::valid_name(&key) || self.entity(id).is_none() {
+            return Err(storage::invalid("invalid alias or entity"));
+        }
+        if let Some(existing) = self.resolve(&key) {
+            return if existing == id {
+                Ok(())
+            } else {
+                Err(storage::invalid("alias already identifies another entity"))
+            };
+        }
+        if self.world.aliases.len() >= 8192 {
+            return Err(storage::invalid("alias limit reached"));
+        }
+        self.world.changed()?;
+        self.world.aliases.push(crate::world::Alias {
+            name: key.clone(),
+            entity: id,
+        });
+        self.world.rebuild(self.entities.len())?;
+        self.names.insert(key, id);
+        Ok(())
+    }
+    pub fn link(
+        &mut self,
+        source: EntityId,
+        relation: crate::world::Relationship,
+        target: EntityId,
+    ) -> io::Result<()> {
+        if self.entity(source).is_none() || self.entity(target).is_none() {
+            return Err(storage::invalid("unknown relationship endpoint"));
+        }
+        let link = crate::world::Link {
+            source,
+            relation: relation as u16,
+            target,
+        };
+        if self.world.links.contains(&link) {
+            return Ok(());
+        }
+        if self.world.links.len() >= 65536 {
+            return Err(storage::invalid("world relationship limit reached"));
+        }
+        self.world.changed()?;
+        self.world.links.push(link);
+        self.world.rebuild(self.entities.len())
+    }
+    pub fn update_entity(&mut self, id: EntityId, value: &str) -> io::Result<()> {
+        let e = self
+            .entity(id)
+            .ok_or_else(|| storage::invalid("unknown entity"))?;
+        if e.value == value {
+            return Ok(());
+        }
+        let version = e
+            .version
+            .checked_add(1)
+            .ok_or_else(|| storage::invalid("entity version exhausted"))?;
+        self.world.changed()?;
+        self.entities[id.0 as usize].value = value.into();
+        self.entities[id.0 as usize].version = version;
+        Ok(())
     }
     pub fn observe_language(
         &mut self,
@@ -237,6 +357,9 @@ impl DamonData {
                 write_u32(&mut f, edge.target)?;
             }
         }
+        let mut world = self.world.clone();
+        world.rebuild(self.entities.len())?;
+        world.encode(&mut f)?;
         if f.len() > storage::MAX_IMAGE {
             return Err(storage::invalid("brain image exceeds size limit"));
         }
@@ -245,7 +368,7 @@ impl DamonData {
     fn decode(bytes: &[u8]) -> io::Result<Self> {
         let mut r = Reader { bytes, pos: 0 };
         let header = r.take(8)?;
-        if header != MAGIC && header != LEGACY {
+        if header != MAGIC && header != LEGACY && header != GRAPHS {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "invalid damon.data header",
@@ -289,7 +412,7 @@ impl DamonData {
                 confidence: r.u8()?,
             });
         }
-        if header == MAGIC {
+        if header == MAGIC || header == GRAPHS {
             let count = r.u32()?;
             if count > 4096 {
                 return Err(storage::invalid("too many learned graphs"));
@@ -336,66 +459,27 @@ impl DamonData {
                 }
             }
         }
+        if header == MAGIC {
+            data.world = crate::world::World::decode(&mut r, data.entities.len())?;
+        } else {
+            data.world.rebuild(data.entities.len())?;
+        }
+        for alias in &data.world.aliases {
+            if data
+                .names
+                .insert(alias.name.clone(), alias.entity)
+                .is_some()
+            {
+                return Err(storage::invalid("alias conflicts with a name"));
+            }
+        }
         if r.pos != bytes.len() {
             return Err(storage::invalid("trailing payload bytes"));
         }
-        if data.names.len() != data.entities.len() {
+        if data.names.len() != data.entities.len() + data.world.aliases.len() {
             return Err(storage::invalid("duplicate entity names"));
         }
         Ok(data)
-    }
-}
-fn write_u16(w: &mut impl Write, v: u16) -> io::Result<()> {
-    w.write_all(&v.to_le_bytes())
-}
-fn write_i16(w: &mut impl Write, v: i16) -> io::Result<()> {
-    w.write_all(&v.to_le_bytes())
-}
-fn write_u32(w: &mut impl Write, v: u32) -> io::Result<()> {
-    w.write_all(&v.to_le_bytes())
-}
-fn write_u64(w: &mut impl Write, v: u64) -> io::Result<()> {
-    w.write_all(&v.to_le_bytes())
-}
-fn write_string(w: &mut impl Write, s: &str) -> io::Result<()> {
-    write_u32(w, s.len() as u32)?;
-    w.write_all(s.as_bytes())
-}
-struct Reader<'a> {
-    bytes: &'a [u8],
-    pos: usize,
-}
-impl<'a> Reader<'a> {
-    fn take(&mut self, n: usize) -> io::Result<&'a [u8]> {
-        if n > self.bytes.len() - self.pos {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "truncated damon.data",
-            ));
-        }
-        let s = &self.bytes[self.pos..self.pos + n];
-        self.pos += n;
-        Ok(s)
-    }
-    fn u8(&mut self) -> io::Result<u8> {
-        Ok(self.take(1)?[0])
-    }
-    fn u16(&mut self) -> io::Result<u16> {
-        Ok(u16::from_le_bytes(self.take(2)?.try_into().unwrap()))
-    }
-    fn i16(&mut self) -> io::Result<i16> {
-        Ok(i16::from_le_bytes(self.take(2)?.try_into().unwrap()))
-    }
-    fn u32(&mut self) -> io::Result<u32> {
-        Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
-    }
-    fn u64(&mut self) -> io::Result<u64> {
-        Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
-    }
-    fn string(&mut self) -> io::Result<String> {
-        let n = self.u32()? as usize;
-        String::from_utf8(self.take(n)?.to_vec())
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid utf-8"))
     }
 }
 #[cfg(test)]
