@@ -19,6 +19,9 @@ Delivered milestones:
 - Persistent world kinds, aliases, adjacency relationships, entity versions,
   project registration, focus, previous action/target, recent references, pronouns,
   and whole-procedure retargeting with safeguards against stale project binding.
+- Persistent dependency-aware memo tables with entity-version and manifest-state
+  invalidation, deterministic eviction, cached test discovery, and reusable
+  lint/typecheck/build verification plans.
 
 Remaining implementation priorities:
 
@@ -28,8 +31,8 @@ Remaining implementation priorities:
    lexical/grammar/context/world evidence, calibrate risk-sensitive thresholds,
    and support source/destination/modifier/reference/dependency/result semantics.
    Preserve all constraints or clarify. Cover the full requested example slate.
-3. Add versioned dependency-aware memoization, sparse state-hash tables, cached
-   tool/test discovery and verification plans with measured invalidation/reuse.
+3. Extend memoization from project/test discovery into file inventory and verified
+   coding results where external-state fingerprints can prove freshness.
 4. Persist compact outcome/latency/cost/model/confidence/risk strategy statistics
    and rank deterministic inspection/search/test/model/clarification strategies.
 5. Represent verified repeated procedures as tiny call/store/compare/branch/

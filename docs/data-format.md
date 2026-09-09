@@ -1,4 +1,4 @@
-# Damon binary state, version 2
+# Damon binary state, envelope version 2
 
 Live memory defaults to `~/.damon/damon.data`; `DAMON_DATA` overrides it. State
 contains private project paths and learned evidence. It is not a credential
@@ -113,3 +113,21 @@ Alias conflicts and unknown relationship/context endpoints are rejected.
 Both prior payload revisions remain readable. `v2-seed.data` is a synthetic
 checksummed migration fixture. Legacy relative project paths retain their old
 meaning; new project registrations and fresh seeds use canonical absolute paths.
+
+## Payload revision 4: dependency-aware memoization
+
+Payload magic `DAMON\0\x04\0` appends a bounded memo table after world state.
+The table stores at most 4,096 flat dependency rows followed by at most 1,024
+entries. A dependency is an entity ID and the entity version observed when the
+result was computed. An entry contains a one-byte kind, stable u64 lookup key,
+stable u64 external-state hash, dependency offset/count, saturating reuse count,
+and a value of at most 64 KiB. The `(kind, key)` hash index is derived on load.
+
+Lookup requires both the same external-state hash and unchanged versions for
+every dependency. A mismatch removes the stale entry. Updating an entity eagerly
+removes all entries that depend on it. Least-used entries are evicted first with
+a deterministic kind/key tie break. Discovery hashes use explicit FNV-1a rather
+than Rust's process-dependent hashing. Cached command values are decoded through
+the deterministic tool allowlist; cache bytes cannot introduce a new executable
+or argument. Revision-3 world payloads remain readable and acquire an empty memo
+table when next saved.

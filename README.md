@@ -81,11 +81,13 @@ required. Set `DAMON_OLLAMA_MODEL=''` to skip Ollama.
 ## Implementation status
 
 The tested kernel has recoverable binary memory, bounded candidate graphs,
-validated teacher graphs, conditional plans, exact-graph learning/reuse, policy
-checks, bounded subprocess lifetimes, and basic coding inspection/testing.
+validated teacher graphs, conditional plans, exact-graph learning/reuse,
+dependency-aware cached discovery, reusable verification plans, policy checks,
+bounded subprocess lifetimes, and basic coding inspection/testing.
 See [semantic graphs](docs/semantic-engine.md) and the
-[implementation roadmap](docs/tao-roadmap.md) for the remaining work. Rich file editing, cached discovery, and learned procedures are ongoing work,
-not complete capabilities.
+[implementation roadmap](docs/tao-roadmap.md) for the remaining work. Rich file
+editing, cached coding results, and learned procedures are ongoing work, not
+complete capabilities.
 
 ## Development
 

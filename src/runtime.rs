@@ -64,12 +64,15 @@ impl Damon {
         if let Err(e) = crate::semantics::validate_request(input, &meaning, &self.data) {
             return format!("I need a clearer request: {e}");
         }
-        let plan = match crate::reason::plan(&meaning, &self.data) {
+        let mut plan = match crate::reason::plan(&meaning, &self.data) {
             Ok(plan) => plan,
             Err(e) => return e,
         };
         // Check the entire plan before any tool can produce side effects.
-        for action in &plan.actions {
+        for action in &mut plan.actions {
+            if let Err(e) = tools::prepare(action, &mut self.data) {
+                return format!("Deterministic discovery failed: {e}");
+            }
             if let Err(e) = self.policy.check(action) {
                 return format!("Policy blocked the plan: {e}");
             }
@@ -117,11 +120,12 @@ impl Damon {
         }
         if input.eq_ignore_ascii_case("show memory status") {
             return Some(format!(
-                "Memory generation {}: {} entities, {} learned phrases, {} retained experiences.",
+                "Memory generation {}: {} entities, {} learned phrases, {} retained experiences, and {} cached computations.",
                 self.data.generation(),
                 self.data.entities.len(),
                 self.data.language_counts.len(),
-                self.data.experiences.len()
+                self.data.experiences.len(),
+                self.data.memo.entries.len()
             ));
         }
         for (prefix, restore) in [

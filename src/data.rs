@@ -6,7 +6,8 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-const MAGIC: &[u8; 8] = b"DAMON\0\x03\0";
+const MAGIC: &[u8; 8] = b"DAMON\0\x04\0";
+const WORLD: &[u8; 8] = b"DAMON\0\x03\0";
 const GRAPHS: &[u8; 8] = b"DAMON\0\x02\0";
 const LEGACY: &[u8; 8] = b"DAMON\0\x01\0";
 
@@ -35,6 +36,7 @@ pub struct DamonData {
     pub experiences: Vec<Experience>,
     pub learned_graphs: HashMap<u64, crate::types::MeaningGraph>,
     pub world: crate::world::World,
+    pub memo: crate::cache::MemoTable,
 }
 
 impl DamonData {
@@ -61,6 +63,7 @@ impl DamonData {
             experiences: Vec::new(),
             learned_graphs: HashMap::new(),
             world: crate::world::World::default(),
+            memo: crate::cache::MemoTable::default(),
         }
     }
     pub fn generation(&self) -> u64 {
@@ -208,6 +211,7 @@ impl DamonData {
         self.world.changed()?;
         self.entities[id.0 as usize].value = value.into();
         self.entities[id.0 as usize].version = version;
+        self.memo.invalidate_entity(id);
         Ok(())
     }
     pub fn observe_language(
@@ -360,6 +364,7 @@ impl DamonData {
         let mut world = self.world.clone();
         world.rebuild(self.entities.len())?;
         world.encode(&mut f)?;
+        self.memo.encode(&mut f)?;
         if f.len() > storage::MAX_IMAGE {
             return Err(storage::invalid("brain image exceeds size limit"));
         }
@@ -368,7 +373,7 @@ impl DamonData {
     fn decode(bytes: &[u8]) -> io::Result<Self> {
         let mut r = Reader { bytes, pos: 0 };
         let header = r.take(8)?;
-        if header != MAGIC && header != LEGACY && header != GRAPHS {
+        if header != MAGIC && header != WORLD && header != LEGACY && header != GRAPHS {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "invalid damon.data header",
@@ -412,7 +417,7 @@ impl DamonData {
                 confidence: r.u8()?,
             });
         }
-        if header == MAGIC || header == GRAPHS {
+        if header == MAGIC || header == WORLD || header == GRAPHS {
             let count = r.u32()?;
             if count > 4096 {
                 return Err(storage::invalid("too many learned graphs"));
@@ -459,10 +464,13 @@ impl DamonData {
                 }
             }
         }
-        if header == MAGIC {
+        if header == MAGIC || header == WORLD {
             data.world = crate::world::World::decode(&mut r, data.entities.len())?;
         } else {
             data.world.rebuild(data.entities.len())?;
+        }
+        if header == MAGIC {
+            data.memo = crate::cache::MemoTable::decode(&mut r, &data.entities)?;
         }
         for alias in &data.world.aliases {
             if data
@@ -498,5 +506,34 @@ mod tests {
         assert_eq!(d2.resolve("cpython"), Some(id));
         assert_eq!(d2.language_candidates(123), &[(IntentId(7), 1)]);
         let _ = fs::remove_file(p);
+    }
+
+    #[test]
+    fn revision_three_world_image_migrates_to_memo_payload() {
+        let p =
+            std::env::temp_dir().join(format!("damon-v3-migration-{}.data", std::process::id()));
+        for suffix in ["", ".journal", ".prev", ".lock"] {
+            let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
+        }
+        let d = DamonData::open(&p).unwrap();
+        drop(d);
+        let image = fs::read(&p).unwrap();
+        let (generation, payload, _) = storage::unframe(&image).unwrap();
+        assert_eq!(&payload[..8], MAGIC);
+        assert_eq!(&payload[payload.len() - 8..], &[0; 8]);
+        let mut old = payload[..payload.len() - 8].to_vec();
+        old[..8].copy_from_slice(WORLD);
+        fs::write(&p, storage::frame(generation, &old).unwrap()).unwrap();
+
+        let mut migrated = DamonData::open(&p).unwrap();
+        assert!(migrated.memo.entries.is_empty());
+        migrated.compact().unwrap();
+        drop(migrated);
+        let image = fs::read(&p).unwrap();
+        let (_, payload, _) = storage::unframe(&image).unwrap();
+        assert_eq!(&payload[..8], MAGIC);
+        for suffix in ["", ".journal", ".prev", ".lock"] {
+            let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
+        }
     }
 }
