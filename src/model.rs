@@ -9,6 +9,7 @@ use std::{
 
 const MAX_PROMPT_BYTES: usize = 64 * 1024;
 const MAX_RESPONSE_BYTES: usize = 256 * 1024;
+const MAX_STREAM_BYTES: usize = 8 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(45);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,7 +141,7 @@ impl ModelRouter {
     }
 
     pub fn ollama_models(&self) -> Result<Vec<String>, String> {
-        let response = http_request(&self.ollama_host, "GET", "/api/tags", None, |_| {})?;
+        let response = http_request(&self.ollama_host, "GET", "/api/tags", None, |_| Ok(()))?;
         let root = crate::json::parse(&response)?;
         let rows = root
             .get("models")
@@ -182,8 +183,13 @@ impl ModelRouter {
         event: &mut impl FnMut(ModelEvent),
     ) -> Result<String, String> {
         match self.ollama_chat_once(prompt, format, true, event) {
-            Err(error) if error.contains("HTTP 400") => {
-                self.ollama_chat_once(prompt, format, false, event)
+            Err(error) if is_ollama_compatibility_error(&error) => {
+                match self.ollama_chat_once(prompt, format, false, event) {
+                    Err(error) if format != "\"json\"" && is_ollama_compatibility_error(&error) => {
+                        self.ollama_chat_once(prompt, "\"json\"", false, event)
+                    }
+                    result => result,
+                }
             }
             result => result,
         }
@@ -212,11 +218,13 @@ impl ModelRouter {
             "/api/chat",
             Some(&body),
             |line| {
-                let Ok(value) = crate::json::parse(line) else {
-                    return;
-                };
+                let value = crate::json::parse(line)
+                    .map_err(|error| format!("invalid Ollama stream row: {error}"))?;
+                if let Some(error) = value.get("error").and_then(crate::json::Value::as_str) {
+                    return Err(format!("Ollama stream error: {error}"));
+                }
                 let Some(message) = value.get("message") else {
-                    return;
+                    return Ok(());
                 };
                 if message
                     .get("thinking")
@@ -228,10 +236,12 @@ impl ModelRouter {
                     event(ModelEvent::Thinking);
                 }
                 if let Some(content) = message.get("content").and_then(crate::json::Value::as_str) {
-                    if answer.len().saturating_add(content.len()) <= MAX_RESPONSE_BYTES {
-                        answer.push_str(content);
+                    if answer.len().saturating_add(content.len()) > MAX_RESPONSE_BYTES {
+                        return Err("Ollama answer exceeds 256 KiB".into());
                     }
+                    answer.push_str(content);
                 }
+                Ok(())
             },
         )?;
         if answer.trim().is_empty() {
@@ -284,12 +294,24 @@ impl ModelRouter {
     }
 }
 
+fn is_ollama_compatibility_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    let compatible_status = error.contains("HTTP 400")
+        || error.contains("HTTP 422")
+        || error.contains("HTTP 500")
+        || error.contains("Ollama stream error");
+    compatible_status
+        && ["think", "format", "schema", "structured", "support"]
+            .iter()
+            .any(|word| lower.contains(word))
+}
+
 fn http_request(
     host: &str,
     method: &str,
     path: &str,
     body: Option<&str>,
-    mut line: impl FnMut(&str),
+    mut line: impl FnMut(&str) -> Result<(), String>,
 ) -> Result<String, String> {
     let host = host
         .strip_prefix("http://")
@@ -352,21 +374,33 @@ fn http_request(
             content_length = value.trim().parse::<usize>().ok();
         }
     }
-    let bytes = if chunked {
-        read_chunked(&mut reader, &mut line)?
-    } else {
-        read_sized(&mut reader, content_length, &mut line)?
+    let success = (200..300).contains(&code);
+    let mut accepted_line = |row: &str| {
+        if success {
+            line(row)
+        } else {
+            Ok(())
+        }
     };
-    let text = String::from_utf8(bytes).map_err(|_| "Ollama returned invalid UTF-8")?;
-    if !(200..300).contains(&code) {
+    let bytes = if chunked {
+        read_chunked(&mut reader, &mut accepted_line)?
+    } else {
+        read_sized(&mut reader, content_length, &mut accepted_line)?
+    };
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    if !success {
         return Err(format!("Ollama returned HTTP {code}: {}", text.trim()));
     }
     Ok(text)
 }
 
-fn read_chunked(reader: &mut impl BufRead, line: &mut impl FnMut(&str)) -> Result<Vec<u8>, String> {
+fn read_chunked(
+    reader: &mut impl BufRead,
+    line: &mut impl FnMut(&str) -> Result<(), String>,
+) -> Result<Vec<u8>, String> {
     let mut output = Vec::new();
     let mut pending = Vec::new();
+    let mut transferred = 0_usize;
     loop {
         let mut size_line = String::new();
         reader
@@ -377,15 +411,17 @@ fn read_chunked(reader: &mut impl BufRead, line: &mut impl FnMut(&str)) -> Resul
         if size == 0 {
             break;
         }
-        if output.len().saturating_add(size) > MAX_RESPONSE_BYTES {
-            return Err("Ollama response exceeds 256 KiB".into());
+        transferred = transferred.saturating_add(size);
+        if transferred > MAX_STREAM_BYTES {
+            return Err("Ollama stream exceeds 8 MiB".into());
         }
-        let start = output.len();
-        output.resize(start + size, 0);
+        let mut chunk = vec![0_u8; size];
         reader
-            .read_exact(&mut output[start..])
+            .read_exact(&mut chunk)
             .map_err(|error| format!("cannot read Ollama chunk body: {error}"))?;
-        pending.extend_from_slice(&output[start..]);
+        let retained = MAX_RESPONSE_BYTES.saturating_sub(output.len()).min(size);
+        output.extend_from_slice(&chunk[..retained]);
+        pending.extend_from_slice(&chunk);
         emit_lines(&mut pending, line)?;
         let mut ending = [0_u8; 2];
         reader
@@ -402,52 +438,61 @@ fn read_chunked(reader: &mut impl BufRead, line: &mut impl FnMut(&str)) -> Resul
 fn read_sized(
     reader: &mut impl Read,
     content_length: Option<usize>,
-    line: &mut impl FnMut(&str),
+    line: &mut impl FnMut(&str) -> Result<(), String>,
 ) -> Result<Vec<u8>, String> {
-    let limit = content_length.unwrap_or(MAX_RESPONSE_BYTES);
-    if limit > MAX_RESPONSE_BYTES {
-        return Err("Ollama response exceeds 256 KiB".into());
+    if content_length.is_some_and(|length| length > MAX_STREAM_BYTES) {
+        return Err("Ollama stream exceeds 8 MiB".into());
     }
-    let mut output = Vec::with_capacity(limit);
-    if content_length.is_some() {
-        output.resize(limit, 0);
-        reader
-            .read_exact(&mut output)
+    let limit = content_length.unwrap_or(MAX_STREAM_BYTES);
+    let mut output = Vec::with_capacity(limit.min(MAX_RESPONSE_BYTES));
+    let mut pending = Vec::new();
+    let mut transferred = 0_usize;
+    let mut block = [0_u8; 8192];
+    while transferred < limit {
+        let wanted = (limit - transferred).min(block.len());
+        let count = reader
+            .read(&mut block[..wanted])
             .map_err(|error| format!("cannot read Ollama response: {error}"))?;
-    } else {
-        reader
-            .take((limit + 1) as u64)
-            .read_to_end(&mut output)
-            .map_err(|error| format!("cannot read Ollama response: {error}"))?;
-        if output.len() > limit {
-            return Err("Ollama response exceeds 256 KiB".into());
+        if count == 0 {
+            if content_length.is_some() {
+                return Err("Ollama response ended early".into());
+            }
+            break;
         }
+        transferred += count;
+        let retained = MAX_RESPONSE_BYTES.saturating_sub(output.len()).min(count);
+        output.extend_from_slice(&block[..retained]);
+        pending.extend_from_slice(&block[..count]);
+        emit_lines(&mut pending, line)?;
     }
-    let text = std::str::from_utf8(&output).map_err(|_| "Ollama returned invalid UTF-8")?;
-    for row in text.lines().filter(|row| !row.trim().is_empty()) {
-        line(row);
-    }
+    emit_tail(&mut pending, line)?;
     Ok(output)
 }
 
-fn emit_lines(pending: &mut Vec<u8>, line: &mut impl FnMut(&str)) -> Result<(), String> {
+fn emit_lines(
+    pending: &mut Vec<u8>,
+    line: &mut impl FnMut(&str) -> Result<(), String>,
+) -> Result<(), String> {
     while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
         let row = pending.drain(..=end).collect::<Vec<_>>();
         let row = std::str::from_utf8(&row[..row.len() - 1])
             .map_err(|_| "Ollama returned invalid UTF-8")?
             .trim_end_matches('\r');
         if !row.is_empty() {
-            line(row);
+            line(row)?;
         }
     }
     Ok(())
 }
 
-fn emit_tail(pending: &mut Vec<u8>, line: &mut impl FnMut(&str)) -> Result<(), String> {
+fn emit_tail(
+    pending: &mut Vec<u8>,
+    line: &mut impl FnMut(&str) -> Result<(), String>,
+) -> Result<(), String> {
     if !pending.is_empty() {
         let row = std::str::from_utf8(pending).map_err(|_| "Ollama returned invalid UTF-8")?;
         if !row.trim().is_empty() {
-            line(row);
+            line(row)?;
         }
         pending.clear();
     }
@@ -472,6 +517,10 @@ mod tests {
     }
 
     fn read_request(socket: &mut TcpStream) {
+        let _ = read_request_bytes(socket);
+    }
+
+    fn read_request_bytes(socket: &mut TcpStream) -> Vec<u8> {
         let mut request = Vec::new();
         let mut block = [0_u8; 512];
         loop {
@@ -489,7 +538,7 @@ mod tests {
                 .and_then(|(_, value)| value.trim().parse::<usize>().ok())
                 .unwrap_or(0);
             if request.len() >= header_end + 4 + length {
-                return;
+                return request;
             }
         }
     }
@@ -546,6 +595,141 @@ mod tests {
                 ModelEvent::Processing
             ]
         );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn long_reasoning_stream_does_not_consume_the_answer_limit() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            read_request(&mut socket);
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+            )
+            .unwrap();
+            let thought = "x".repeat(4096);
+            for _ in 0..80 {
+                let row =
+                    format!("{{\"message\":{{\"thinking\":\"{thought}\"}},\"done\":false}}\n");
+                write!(socket, "{:x}\r\n{}\r\n", row.len(), row).unwrap();
+            }
+            let answer = "{\"message\":{\"content\":\"{\\\"ok\\\":true}\"},\"done\":true}\n";
+            write!(socket, "{:x}\r\n{}\r\n0\r\n\r\n", answer.len(), answer).unwrap();
+        });
+        let model = router(address.to_string());
+        let response = model
+            .ollama_chat_once("prompt", "\"json\"", true, &mut |_| {})
+            .unwrap();
+        assert_eq!(response, r#"{"ok":true}"#);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn stream_error_is_reported_instead_of_becoming_an_empty_answer() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            read_request(&mut socket);
+            let row = "{\"error\":\"model runner stopped\"}\n";
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n",
+                row.len(),
+                row
+            )
+            .unwrap();
+        });
+        let model = router(address.to_string());
+        let error = model
+            .ollama_chat_once("prompt", "\"json\"", true, &mut |_| {})
+            .unwrap_err();
+        assert!(error.contains("model runner stopped"));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn server_compatibility_error_retries_without_thinking() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            for attempt in 0..2 {
+                let (mut socket, _) = listener.accept().unwrap();
+                let request = read_request_bytes(&mut socket);
+                let body = std::str::from_utf8(&request).unwrap();
+                if attempt == 0 {
+                    assert!(body.contains("\"think\":true"));
+                    let error = "{\"error\":\"thinking is not supported\"}";
+                    write!(
+                        socket,
+                        "HTTP/1.1 500 Error\r\nContent-Length: {}\r\n\r\n{}",
+                        error.len(),
+                        error
+                    )
+                    .unwrap();
+                } else {
+                    assert!(body.contains("\"think\":false"));
+                    let answer =
+                        "{\"message\":{\"content\":\"{\\\"ok\\\":true}\"},\"done\":true}\n";
+                    write!(
+                        socket,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+                        answer.len(),
+                        answer
+                    )
+                    .unwrap();
+                }
+            }
+        });
+        let model = router(address.to_string());
+        let response = model
+            .ollama_chat("prompt", "\"json\"", &mut |_| {})
+            .unwrap();
+        assert_eq!(response, r#"{"ok":true}"#);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn schema_compatibility_error_retries_with_plain_json() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            for attempt in 0..3 {
+                let (mut socket, _) = listener.accept().unwrap();
+                let request = read_request_bytes(&mut socket);
+                let body = std::str::from_utf8(&request).unwrap();
+                if attempt < 2 {
+                    assert!(body.contains("\"format\":{") && body.contains("\"type\":\"object\""));
+                    let error = "{\"error\":\"structured schema format is not supported\"}";
+                    write!(
+                        socket,
+                        "HTTP/1.1 400 Error\r\nContent-Length: {}\r\n\r\n{}",
+                        error.len(),
+                        error
+                    )
+                    .unwrap();
+                } else {
+                    assert!(body.contains("\"format\":\"json\""));
+                    assert!(body.contains("\"think\":false"));
+                    let answer =
+                        "{\"message\":{\"content\":\"{\\\"ok\\\":true}\"},\"done\":true}\n";
+                    write!(
+                        socket,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+                        answer.len(),
+                        answer
+                    )
+                    .unwrap();
+                }
+            }
+        });
+        let model = router(address.to_string());
+        let schema = r#"{"type":"object"}"#;
+        let response = model.ollama_chat("prompt", schema, &mut |_| {}).unwrap();
+        assert_eq!(response, r#"{"ok":true}"#);
         server.join().unwrap();
     }
 

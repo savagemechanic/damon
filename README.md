@@ -103,6 +103,9 @@ Routing reuses verified learned graphs and exact known meanings first, then:
 Ollama receives a short prompt plus a dynamically restricted JSON shape over a
 timeout-bounded local socket. Damon streams the response, distinguishes actual
 thinking from waiting, and allows one final repair when a candidate fails validation.
+Reasoning and final-answer limits are tracked separately, so a long bounded thinking
+stream cannot consume the answer budget. Damon also retries older models without
+thinking and with plain JSON when their Ollama runner rejects newer options.
 External commands receive a bounded prompt on stdin and return strict semantic JSON
 on stdout. All providers use the same meaning-only contract and context-local entity
 slots; no model can select a tool, command, application, protocol, or persistent

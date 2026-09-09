@@ -101,7 +101,7 @@ impl Damon {
                                 teacher = Some((provider, latency_ms));
                                 m
                             }
-                            Err(_) => return teacher_unavailable(),
+                            Err(error) => return teacher_unavailable(&error),
                         }
                     }
                 } else {
@@ -113,7 +113,7 @@ impl Damon {
                     teacher = Some((provider, latency_ms));
                     m
                 }
-                Err(_) => return teacher_unavailable(),
+                Err(error) => return teacher_unavailable(&error),
             },
         };
 
@@ -468,8 +468,22 @@ fn conversational_response(input: &str) -> Option<String> {
     None
 }
 
-fn teacher_unavailable() -> String {
-    "I couldn't resolve that request with my built-in language support, and no optional language teacher returned a valid meaning. Try rephrasing it or type “help”.".into()
+fn teacher_unavailable(error: &str) -> String {
+    let detail = if !error.contains("Ollama:") {
+        "No Ollama model is currently available. Select a model or enable another language teacher."
+    } else if error.contains("cannot connect")
+        || error.contains("cannot resolve")
+        || error.contains("timed out")
+    {
+        "I couldn't reach Ollama. Check the Ollama connection and selected model."
+    } else if error.contains("exceeds 8 MiB") || error.contains("exceeds 256 KiB") {
+        "Ollama's response exceeded Damon's safety limit. Try a smaller or less verbose model."
+    } else if error.contains("HTTP") || error.contains("stream error") {
+        "Ollama stopped before returning a complete meaning. Try the request again or select another model."
+    } else {
+        "Ollama answered, but its meaning did not pass Damon's safety checks. Try rephrasing the request or select a stronger model."
+    };
+    format!("I don't know that request deterministically yet. {detail} Try rephrasing it, or type “help” to see my current native capabilities.")
 }
 
 fn action_risk(effects: crate::types::Effects) -> u8 {
