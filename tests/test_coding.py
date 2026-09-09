@@ -77,6 +77,37 @@ async def test_coding_agent_stops_when_no_checks_exist(tmp_path: Path):
     assert outcome.response == "nothing to change"
 
 
+
+class ToolSurfaceModel:
+    def __init__(self) -> None:
+        self.tool_names: set[str] = set()
+
+    def reset_run(self) -> None:
+        pass
+
+    async def generate(self, messages, tools):
+        self.tool_names = {item["function"]["name"] for item in tools}
+        return ModelResponse(content="done")
+
+
+@pytest.mark.asyncio
+async def test_coding_agent_exposes_only_coding_tools(tmp_path: Path):
+    import subprocess
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    registry = default_registry(tmp_path)
+    model = ToolSurfaceModel()
+    agent = CodingAgent(model, registry, ToolExecutor(registry, Policy()))
+
+    await agent.run("inspect")
+
+    assert model.tool_names == {
+        "list_files", "read_file", "search_code", "write_file",
+        "apply_patch", "run_command", "git_diff",
+    }
+    assert "verify_project" not in model.tool_names
+    assert "git_status" not in model.tool_names
+    assert "discover_checks" not in model.tool_names
+
 def test_coding_agent_rejects_invalid_attempt_budget(tmp_path: Path):
     registry = default_registry(tmp_path)
     with pytest.raises(ValueError, match="max_attempts"):
