@@ -131,3 +131,19 @@ than Rust's process-dependent hashing. Cached command values are decoded through
 the deterministic tool allowlist; cache bytes cannot introduce a new executable
 or argument. Revision-3 world payloads remain readable and acquire an empty memo
 table when next saved.
+
+## Payload revision 5: learned strategy statistics
+
+Payload magic `DAMON\0\x05\0` appends at most 4,096 fixed-size strategy rows.
+Each row stores a stable state hash, one-byte strategy ID, saturating success and
+failure counts, accumulated latency milliseconds, cost units, model-call count,
+confidence total, and risk total. The `(state hash, strategy)` lookup index is
+derived on load. Eviction removes the least-observed row with stable hash/ID tie
+breaking.
+
+Scores use simple smoothed success ratios and bounded latency, cost, confidence,
+and risk terms. Fixed base tiers preserve inspect/search/test/deterministic work
+ahead of local models, external free models, clarification, and paid cloud use.
+Statistics rank choices only: they cannot grant permission, create arguments, or
+serve as verification. Revision-4 memo payloads remain readable and acquire an
+empty strategy table when saved.

@@ -17,6 +17,7 @@ mod storage;
 mod process;
 
 pub mod semantics;
+pub mod strategy;
 
 mod codec;
 pub mod world;

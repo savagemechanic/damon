@@ -22,6 +22,9 @@ Delivered milestones:
 - Persistent dependency-aware memo tables with entity-version and manifest-state
   invalidation, deterministic eviction, cached test discovery, and reusable
   lint/typecheck/build verification plans.
+- Persistent count-based strategy statistics for success, failure, latency, cost,
+  model usage, confidence, and risk; deterministic tiered ranking; and runtime
+  updates from actual tool exit status and validated teacher execution.
 
 Remaining implementation priorities:
 
@@ -33,8 +36,8 @@ Remaining implementation priorities:
    Preserve all constraints or clarify. Cover the full requested example slate.
 3. Extend memoization from project/test discovery into file inventory and verified
    coding results where external-state fingerprints can prove freshness.
-4. Persist compact outcome/latency/cost/model/confidence/risk strategy statistics
-   and rank deterministic inspection/search/test/model/clarification strategies.
+4. Apply learned rankings to more choice points while preserving hard local-first,
+   policy, dependency, and verification constraints.
 5. Represent verified repeated procedures as tiny call/store/compare/branch/
    jump/return instruction arrays, through the same policy/execution path.
 6. Finish the coding loop: locate/register projects, inspect/search/read files,
