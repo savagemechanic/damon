@@ -1,0 +1,17 @@
+name: Tao Rust
+
+on:
+  push:
+    branches: [tao]
+  pull_request:
+    branches: [tao]
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo fmt --check
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
