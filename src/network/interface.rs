@@ -101,6 +101,16 @@ pub fn discover() -> io::Result<Vec<NetworkInterface>> {
     Ok(interfaces)
 }
 
+pub fn index_for_name(name: &str) -> Option<InterfaceId> {
+    let mut bytes = name.as_bytes().to_vec();
+    if bytes.is_empty() || bytes.contains(&0) {
+        return None;
+    }
+    bytes.push(0);
+    let index = unsafe { if_nametoindex(bytes.as_ptr().cast()) };
+    (index != 0).then_some(InterfaceId(index))
+}
+
 fn classify(name: &str) -> InterfaceKind {
     if name == "lo" || name.starts_with("lo0") {
         InterfaceKind::Loopback

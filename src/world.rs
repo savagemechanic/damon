@@ -52,10 +52,13 @@ impl Context {
         self.recent.truncate(8);
     }
     pub fn observe(&mut self, target: EntityId, action: IntentId, feature: u64) {
+        self.observe_without_focus(target, action, feature);
+        self.focus(target);
+    }
+    pub fn observe_without_focus(&mut self, target: EntityId, action: IntentId, feature: u64) {
         self.previous_target = Some(target);
         self.previous_action = Some(action);
         self.previous_feature = Some(feature);
-        self.focus(target);
     }
 }
 #[derive(Clone, Debug, Default)]

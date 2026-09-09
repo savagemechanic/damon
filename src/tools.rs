@@ -9,6 +9,8 @@ pub const TOOL_GIT_STATUS: ToolId = ToolId(1);
 pub const TOOL_GIT_DIFF: ToolId = ToolId(2);
 pub const TOOL_TEST: ToolId = ToolId(3);
 pub const TOOL_LIST_FILES: ToolId = ToolId(4);
+pub const TOOL_NETWORK_INTERFACES: ToolId = ToolId(6);
+pub const TOOL_NETWORK_ROUTES: ToolId = ToolId(7);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandSpec {
@@ -73,28 +75,38 @@ pub fn action_for(
     target: crate::types::EntityId,
     data: &DamonData,
 ) -> Result<Action, String> {
-    let entity = data
-        .entity(target)
-        .filter(|e| e.kind == 1)
-        .ok_or("unknown project")?;
     let capability =
         crate::capability::for_intent(intent).ok_or("meaning has no known native capability")?;
     let tool = data
         .capabilities
         .resolve_tool(capability)
         .ok_or("capability has no verified implementation")?;
+    let entity = data.entity(target).ok_or("unknown target")?;
+    let args = match tool {
+        TOOL_GIT_STATUS | TOOL_GIT_DIFF | TOOL_TEST | TOOL_LIST_FILES | ToolId(5)
+            if entity.kind == crate::world::PROJECT =>
+        {
+            vec![entity.value.clone()]
+        }
+        TOOL_NETWORK_INTERFACES | TOOL_NETWORK_ROUTES if entity.kind == crate::world::HOST => {
+            Vec::new()
+        }
+        _ => return Err("capability target kind is incompatible with implementation".into()),
+    };
     Ok(Action {
         capability,
         tool,
         target: Some(target),
         effects: required_effects(tool)?,
-        args: vec![entity.value.clone()],
+        args,
     })
 }
 pub fn required_effects(tool: ToolId) -> Result<Effects, String> {
     match tool.0 {
         1..=3 | 5 => Ok(Effects::READ.union(Effects::PROCESS)),
         4 => Ok(Effects::READ),
+        6 => Ok(Effects::READ),
+        7 => Ok(Effects::READ.union(Effects::PROCESS)),
         _ => Err("unknown tool".into()),
     }
 }
@@ -105,6 +117,8 @@ pub fn capability_for_tool(tool: ToolId) -> Option<crate::types::CapabilityId> {
         TOOL_TEST => crate::capability::RUN_TESTS,
         TOOL_LIST_FILES => crate::capability::LIST_FILES,
         ToolId(5) => crate::capability::FIND_CHANGED_FILES,
+        TOOL_NETWORK_INTERFACES => crate::capability::INSPECT_INTERFACES,
+        TOOL_NETWORK_ROUTES => crate::capability::INSPECT_ROUTES,
         _ => return None,
     })
 }
@@ -128,12 +142,107 @@ pub fn execute(action: &Action, policy: &crate::policy::Policy) -> ToolResult {
         TOOL_TEST => run_tests(action),
         TOOL_LIST_FILES => list_files(cwd),
         ToolId(5) => changed_files(cwd),
+        TOOL_NETWORK_INTERFACES => inspect_interfaces(),
+        TOOL_NETWORK_ROUTES => inspect_routes(),
         _ => ToolResult {
             success: false,
             stdout: String::new(),
             stderr: "unknown tool".into(),
             code: None,
         },
+    }
+}
+
+fn inspect_interfaces() -> ToolResult {
+    match crate::network::interface::discover() {
+        Ok(interfaces) => {
+            let lines = interfaces
+                .iter()
+                .map(|interface| {
+                    let kind = format!("{:?}", interface.kind).to_ascii_lowercase();
+                    let state = match (interface.state.up, interface.state.running) {
+                        (true, true) => "up and running",
+                        (true, false) => "up",
+                        _ => "down",
+                    };
+                    let addresses = if interface.addresses.is_empty() {
+                        "no addresses observed".to_string()
+                    } else {
+                        interface
+                            .addresses
+                            .iter()
+                            .map(|address| format!("{}/{}", address.address, address.prefix))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
+                    let mac = interface.mac.map_or_else(
+                        || "MAC not observed".to_string(),
+                        |mac| format!("MAC {mac}"),
+                    );
+                    let mtu = interface
+                        .mtu
+                        .map_or_else(|| "MTU unknown".to_string(), |mtu| format!("MTU {mtu}"));
+                    format!(
+                        "{} (index {}, {kind}) is {state}; {addresses}; {mac}; {mtu}.",
+                        interface.name, interface.index
+                    )
+                })
+                .collect::<Vec<_>>();
+            ToolResult {
+                success: true,
+                stdout: if lines.is_empty() {
+                    "No network interfaces were observed.".into()
+                } else {
+                    lines.join("\n")
+                },
+                stderr: String::new(),
+                code: Some(0),
+            }
+        }
+        Err(error) => tool_error("Network interface discovery failed", error),
+    }
+}
+
+fn inspect_routes() -> ToolResult {
+    match crate::network::route::discover() {
+        Ok(routes) => {
+            let Some(route) = crate::network::route::default_gateway(&routes) else {
+                return ToolResult {
+                    success: true,
+                    stdout: "No active default gateway was observed in the routing table.".into(),
+                    stderr: String::new(),
+                    code: Some(0),
+                };
+            };
+            let name = crate::network::interface::discover()
+                .ok()
+                .and_then(|interfaces| {
+                    interfaces
+                        .into_iter()
+                        .find(|interface| interface.id == route.interface)
+                        .map(|interface| interface.name)
+                })
+                .unwrap_or_else(|| format!("index {}", route.interface.0));
+            ToolResult {
+                success: true,
+                stdout: format!(
+                    "The active default route sends traffic through gateway {} on interface {name}.",
+                    route.gateway.expect("default gateway was filtered above")
+                ),
+                stderr: String::new(),
+                code: Some(0),
+            }
+        }
+        Err(error) => tool_error("Routing-table discovery failed", error),
+    }
+}
+
+fn tool_error(context: &str, error: impl std::fmt::Display) -> ToolResult {
+    ToolResult {
+        success: false,
+        stdout: String::new(),
+        stderr: format!("{context}: {error}"),
+        code: None,
     }
 }
 fn run(cwd: &str, program: &str, args: &[&str]) -> ToolResult {

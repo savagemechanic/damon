@@ -10,6 +10,8 @@ pub const INTENT_GIT_DIFF: IntentId = IntentId(2);
 pub const INTENT_RUN_TESTS: IntentId = IntentId(3);
 pub const INTENT_LIST_FILES: IntentId = IntentId(4);
 pub const INTENT_CHANGED_FILES: IntentId = IntentId(5);
+pub const INTENT_NETWORK_INTERFACES: IntentId = IntentId(6);
+pub const INTENT_DEFAULT_GATEWAY: IntentId = IntentId(7);
 const BEAM_WIDTH: usize = 4;
 
 #[derive(Debug)]
@@ -83,6 +85,20 @@ fn lexical_evidence(text: &str, intent: IntentId) -> i32 {
         {
             150
         }
+        INTENT_NETWORK_INTERFACES
+            if text.contains("network interface")
+                || text.contains("what network am i connected")
+                || text.contains("how am i connected") =>
+        {
+            160
+        }
+        INTENT_DEFAULT_GATEWAY
+            if text.contains("default gateway")
+                || text.contains("how does traffic leave")
+                || text.contains("how traffic leaves") =>
+        {
+            160
+        }
         _ => 0,
     }
 }
@@ -109,7 +125,7 @@ pub fn understand(input: &str, data: &DamonData) -> Interpretation {
     if let Some(meaning) = data.learned_graphs.get(&feature_hash(input)) {
         if crate::semantics::validate(meaning, data).is_ok() {
             let mut meaning = meaning.clone();
-            if crate::reference::project_mentions(input, data).is_empty() {
+            if meaning.intent.0 <= 5 && crate::reference::project_mentions(input, data).is_empty() {
                 match crate::reference::target(input, data) {
                     Ok(Some(target)) => meaning = crate::reference::retarget(&meaning, target),
                     Ok(None) => {}
@@ -154,7 +170,7 @@ pub fn understand(input: &str, data: &DamonData) -> Interpretation {
                     }
                 }
             };
-            if crate::reference::project_mentions(second, data).is_empty() {
+            if b.intent.0 <= 5 && crate::reference::project_mentions(second, data).is_empty() {
                 if let Some(target) = a.target {
                     b = crate::reference::retarget(&b, target);
                 }
@@ -179,10 +195,6 @@ pub fn understand(input: &str, data: &DamonData) -> Interpretation {
 }
 fn understand_single(input: &str, data: &DamonData) -> Interpretation {
     let text = normalize(input);
-    let target = match crate::reference::target(input, data) {
-        Ok(target) => target,
-        Err(e) => return Interpretation::Clarify(e),
-    };
     let feature = feature_hash(&text);
     let learned = data.language_candidates(feature);
     let mut candidates = Vec::new();
@@ -193,6 +205,8 @@ fn understand_single(input: &str, data: &DamonData) -> Interpretation {
         INTENT_RUN_TESTS,
         INTENT_LIST_FILES,
         INTENT_CHANGED_FILES,
+        INTENT_NETWORK_INTERFACES,
+        INTENT_DEFAULT_GATEWAY,
     ] {
         let evidence = lexical_evidence(&text, intent);
         let prior = learned
@@ -201,6 +215,17 @@ fn understand_single(input: &str, data: &DamonData) -> Interpretation {
             .map(|(_, count)| count.saturating_add(1))
             .unwrap_or(1);
         if evidence > 0 {
+            let target = if matches!(intent, INTENT_NETWORK_INTERFACES | INTENT_DEFAULT_GATEWAY) {
+                data.resolve("local host").filter(|id| {
+                    data.entity(*id)
+                        .is_some_and(|entity| entity.kind == crate::world::HOST)
+                })
+            } else {
+                match crate::reference::target(input, data) {
+                    Ok(target) => target,
+                    Err(error) => return Interpretation::Clarify(error),
+                }
+            };
             candidates.push(CandidateGraph::new(intent, target, evidence, prior));
         }
     }

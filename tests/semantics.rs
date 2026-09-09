@@ -81,6 +81,62 @@ fn yesterday_is_a_time_node_not_a_plain_diff() {
     assert_eq!(m.intent, language::INTENT_CHANGED_FILES);
     assert!(m.nodes.iter().any(|n| n.kind == NodeKind::Time));
 }
+
+#[test]
+fn network_questions_resolve_to_native_host_capabilities() {
+    let f = Fixture::new();
+    let d = f.data();
+    let host = d.resolve("local host").unwrap();
+    for (request, intent, tool, capability) in [
+        (
+            "What network am I connected to?",
+            language::INTENT_NETWORK_INTERFACES,
+            damon::tools::TOOL_NETWORK_INTERFACES,
+            damon::capability::INSPECT_INTERFACES,
+        ),
+        (
+            "What is my default gateway?",
+            language::INTENT_DEFAULT_GATEWAY,
+            damon::tools::TOOL_NETWORK_ROUTES,
+            damon::capability::INSPECT_ROUTES,
+        ),
+    ] {
+        let Interpretation::Resolved(meaning) = language::understand(request, &d) else {
+            panic!("network question was not resolved")
+        };
+        assert_eq!(meaning.intent, intent);
+        assert_eq!(meaning.target, Some(host));
+        semantics::validate_request(request, &meaning, &d).unwrap();
+        let action = damon::reason::resolve(&meaning, &d).unwrap();
+        assert_eq!(action.tool, tool);
+        assert_eq!(action.capability, capability);
+        assert!(action.args.is_empty());
+        damon::policy::Policy::default().check(&action).unwrap();
+    }
+}
+
+#[test]
+fn network_observation_does_not_replace_project_focus() {
+    let f = Fixture::new();
+    let mut d = f.data();
+    let project = d.world.context.focus.unwrap();
+    let Interpretation::Resolved(meaning) = language::understand("show network interfaces", &d)
+    else {
+        panic!("network question was not resolved")
+    };
+    damon::learning::observe_verified(
+        &mut d,
+        language::feature_hash("show network interfaces"),
+        &meaning,
+        true,
+    );
+    assert_eq!(d.world.context.focus, Some(project));
+    assert_eq!(d.world.context.previous_target, meaning.target);
+    let Interpretation::Resolved(coding) = language::understand("run the tests", &d) else {
+        panic!("coding request lost project focus")
+    };
+    assert_eq!(coding.target, Some(project));
+}
 #[test]
 fn teacher_graph_is_strictly_validated() {
     let f = Fixture::new();

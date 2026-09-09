@@ -16,11 +16,15 @@ pub fn observe_verified(data: &mut DamonData, feature: u64, meaning: &MeaningGra
             if let Some(edge) = meaning.edges.iter().find(|e| {
                 e.source == index as u32 && e.relation == crate::semantics::Relation::Target as u16
             }) {
-                data.world.context.observe(
-                    crate::types::EntityId(meaning.nodes[edge.target as usize].value),
-                    IntentId(node.value),
-                    feature,
-                );
+                let target = crate::types::EntityId(meaning.nodes[edge.target as usize].value);
+                let action = IntentId(node.value);
+                if action.0 <= 5 {
+                    data.world.context.observe(target, action, feature);
+                } else {
+                    data.world
+                        .context
+                        .observe_without_focus(target, action, feature);
+                }
             }
         }
     } else {

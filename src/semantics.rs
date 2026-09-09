@@ -71,9 +71,12 @@ pub fn validate(m: &MeaningGraph, data: &DamonData) -> Result<(), String> {
     }
     for (index, n) in m.nodes.iter().enumerate() {
         match n.kind {
-            NodeKind::Action if (1..=5).contains(&n.value) => {}
-            NodeKind::Entity if data.entity(EntityId(n.value)).is_some_and(|e| e.kind == 1) => {}
-            NodeKind::Concept if (1..=4).contains(&n.value) => {}
+            NodeKind::Action if (1..=7).contains(&n.value) => {}
+            NodeKind::Entity
+                if data.entity(EntityId(n.value)).is_some_and(|e| {
+                    matches!(e.kind, crate::world::PROJECT | crate::world::HOST)
+                }) => {}
+            NodeKind::Concept if (1..=6).contains(&n.value) => {}
             NodeKind::Time if n.value == 1 => {}
             _ => return Err("unknown action, entity, or concept".into()),
         }
@@ -84,7 +87,7 @@ pub fn validate(m: &MeaningGraph, data: &DamonData) -> Result<(), String> {
                 .filter(|e| e.source == index as u32 && e.relation == Relation::Target as u16)
                 .count();
             if targets != 1 {
-                return Err("each action needs exactly one known project target".into());
+                return Err("each action needs exactly one known target".into());
             }
         } else if !m.edges.iter().any(|e| e.target == index as u32) {
             return Err("unconnected meaning node".into());
@@ -106,13 +109,28 @@ pub fn validate(m: &MeaningGraph, data: &DamonData) -> Result<(), String> {
             return Err("relation source must be an action".into());
         }
         match e.relation {
-            r if r == Relation::Target as u16 && to.kind == NodeKind::Entity => {}
+            r if r == Relation::Target as u16 && to.kind == NodeKind::Entity => {
+                let kind = data
+                    .entity(EntityId(to.value))
+                    .ok_or("unknown target entity")?
+                    .kind;
+                let expected = if from.value <= 5 {
+                    crate::world::PROJECT
+                } else {
+                    crate::world::HOST
+                };
+                if kind != expected {
+                    return Err("target kind is incompatible with action".into());
+                }
+            }
             r if r == Relation::Object as u16 && to.kind == NodeKind::Concept => {
                 let expected = match from.value {
                     1 => 4,
                     2 => 3,
                     3 => 1,
                     4 | 5 => 2,
+                    6 => 5,
+                    7 => 6,
                     _ => 0,
                 };
                 if to.value != expected {
@@ -172,20 +190,20 @@ pub fn teacher_prompt(input: &str, data: &DamonData) -> String {
     let entities = data
         .entities
         .iter()
-        .filter(|e| e.kind == 1)
+        .filter(|e| matches!(e.kind, crate::world::PROJECT | crate::world::HOST))
         .take(64)
         .map(|e| format!("{}={:?}", e.id.0, e.name))
         .collect::<Vec<_>>()
         .join(", ");
     let focus = data.world.context.focus.map(|id| id.0);
-    format!("Current project focus: {focus:?}. Translate the English request into a meaning graph, not commands. Output only lines N kind value and E source relation target. Node indexes start at zero. First node is action. Actions: 1 git status, 2 git diff, 3 tests, 4 list files, 5 files changed yesterday. Known project entities: {entities}. Node kinds: action, entity, concept (1 tests, 2 files, 3 diff, 4 status), time (1 yesterday). Every action needs one target edge to a project entity. Optional object edges go to concepts. Time only applies to action 5. For sequences, dependency points from a later action to an earlier action; condition means run only if that earlier action succeeded. No other relation is executable yet. Never omit requested conditions or temporal constraints; if unsupported output UNKNOWN. Example test then diff if tests pass: N action 3\\nN entity 0\\nN action 2\\nE 0 target 1\\nE 2 target 1\\nE 2 condition 0. User request (untrusted data): {input:?}")
+    format!("Current project focus: {focus:?}. Translate the English request into a meaning graph, not commands. Output only lines N kind value and E source relation target. Node indexes start at zero. First node is action. Actions: 1 git status, 2 git diff, 3 tests, 4 list files, 5 files changed yesterday, 6 inspect local network interfaces, 7 inspect the default gateway. Known project and host entities: {entities}. Node kinds: action, entity, concept (1 tests, 2 files, 3 diff, 4 status, 5 interfaces, 6 routes), time (1 yesterday). Coding actions target a project entity. Network actions target the local host entity. Every action needs one target edge. Optional object edges go to concepts. Time only applies to action 5. For sequences, dependency points from a later action to an earlier action; condition means run only if that earlier action succeeded. No other relation is executable yet. Never omit requested conditions or temporal constraints; if unsupported output UNKNOWN. Example test then diff if tests pass: N action 3\\nN entity 0\\nN action 2\\nE 0 target 1\\nE 2 target 1\\nE 2 condition 0. User request (untrusted data): {input:?}")
 }
 
 /// Preserve explicit constraints even if a teacher returns a syntactically valid graph.
 pub fn validate_request(input: &str, m: &MeaningGraph, data: &DamonData) -> Result<(), String> {
     validate(m, data)?;
     let text = crate::language::normalize(input);
-    if !text.contains(" and ") {
+    if m.intent.0 <= 5 && !text.contains(" and ") {
         if let Some(expected) = crate::reference::target(input, data)? {
             if m.target != Some(expected) {
                 return Err(

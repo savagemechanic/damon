@@ -140,13 +140,13 @@ impl CapabilityGraph {
                 INSPECT_INTERFACES,
                 "inspect network interfaces",
                 Effects::READ,
-                None,
+                Some(ToolId(6)),
             ),
             (
                 INSPECT_ROUTES,
                 "inspect network routes",
-                Effects::READ,
-                None,
+                Effects::READ.union(Effects::PROCESS),
+                Some(ToolId(7)),
             ),
             (
                 INSPECT_NEIGHBORS,
@@ -401,6 +401,8 @@ pub fn for_intent(intent: crate::types::IntentId) -> Option<CapabilityId> {
         3 => RUN_TESTS,
         4 => LIST_FILES,
         5 => FIND_CHANGED_FILES,
+        6 => INSPECT_INTERFACES,
+        7 => INSPECT_ROUTES,
         _ => return None,
     })
 }
@@ -470,7 +472,7 @@ mod tests {
         graph
             .add_implementation(
                 NewImplementation {
-                    capability: INSPECT_ROUTES,
+                    capability: INSPECT_NEIGHBORS,
                     kind: ImplementationKind::Generated,
                     tool: Some(ToolId(100)),
                     procedure: None,
@@ -480,6 +482,6 @@ mod tests {
                 &[],
             )
             .unwrap();
-        assert!(graph.resolve(INSPECT_ROUTES).is_none());
+        assert!(graph.resolve(INSPECT_NEIGHBORS).is_none());
     }
 }

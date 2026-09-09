@@ -96,6 +96,9 @@ pub fn repeat(input: &str, data: &DamonData) -> Result<MeaningGraph, String> {
         .learned_graphs
         .get(&feature)
         .ok_or("The previous procedure is no longer retained. Please name the action.")?;
+    if meaning.intent.0 > 5 {
+        return Ok(meaning.clone());
+    }
     let target = target(input, data)?.ok_or("Which project should I use?")?;
     if meaning
         .nodes

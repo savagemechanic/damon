@@ -521,7 +521,9 @@ mod tests {
     #[test]
     fn round_trip_data() {
         let p = std::env::temp_dir().join(format!("damon-test-{}.data", std::process::id()));
-        let _ = fs::remove_file(&p);
+        for suffix in ["", ".journal", ".prev", ".lock"] {
+            let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
+        }
         let mut d = DamonData::open(&p).unwrap();
         let id = d.add_entity(1, "cpython", "/tmp/cpython");
         d.observe_language(123, IntentId(7), 1, 240);
@@ -530,7 +532,9 @@ mod tests {
         let d2 = DamonData::open(&p).unwrap();
         assert_eq!(d2.resolve("cpython"), Some(id));
         assert_eq!(d2.language_candidates(123), &[(IntentId(7), 1)]);
-        let _ = fs::remove_file(p);
+        for suffix in ["", ".journal", ".prev", ".lock"] {
+            let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
+        }
     }
 
     #[test]

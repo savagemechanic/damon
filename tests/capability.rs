@@ -27,7 +27,7 @@ fn capability_graph_and_provenance_survive_reopen() {
         .capabilities
         .add_implementation(
             NewImplementation {
-                capability: capability::INSPECT_INTERFACES,
+                capability: capability::INSPECT_NEIGHBORS,
                 kind: ImplementationKind::ApplicationReference,
                 tool: Some(ToolId(900)),
                 procedure: None,
@@ -44,7 +44,7 @@ fn capability_graph_and_provenance_survive_reopen() {
     let data = DamonData::open(&path).unwrap();
     let implementation = data
         .capabilities
-        .resolve(capability::INSPECT_INTERFACES)
+        .resolve(capability::INSPECT_NEIGHBORS)
         .unwrap();
     assert_eq!(
         implementation.kind,
