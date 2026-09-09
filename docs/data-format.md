@@ -177,6 +177,9 @@ implementations, then writes revision 7 on the next save or compaction.
 
 Registry version 2 adds the stable passive-neighbor action ID without changing IR
 version 1; older registry metadata migrates forward because IDs are never recycled.
+Registry version 3 adds stable socket-inventory, network-diagnosis, copy, and
+constraint-based find actions and predicates. Older registry metadata migrates
+forward without changing existing IDs.
 Model-facing entity slots and source spans are request-local and are never stored
 as persistent-ID authority. Canonical IR uses deterministic CBOR for hashing and
 interchange; `damon.data` continues to store learned bound graph templates and
@@ -197,3 +200,16 @@ verified stable knowledge to `Inferred`, `Configured`, or `Learned`; conversion
 also prunes transient-only nodes. This prevents passive snapshots, socket buffers,
 packet payloads, and current connections from silently becoming history. Revision
 7 remains readable and starts with an empty durable topology before the next save.
+
+## Payload revision 9: verified learned procedures
+
+Payload magic `DAMON\0\x09\0` appends a bounded learned-procedure table after
+durable network knowledge. Procedures are compact call/store/compare/branch/jump/
+return instruction arrays compiled only from verified multi-action plans. Each
+call names a capability rather than a shell command or executable. On reuse the
+procedure is reconstructed through the normal capability-resolution, policy,
+execution, and verification path.
+
+Revision 8 remains readable and starts with an empty procedure table. The
+migration suite exercises every payload revision through revision 9, including
+the revision-8 topology boundary.

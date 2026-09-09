@@ -18,6 +18,20 @@ canonical compact semantic encoding remains a small deterministic implementation
 
 ## Run locally
 
+### Install the macOS app
+
+Download the Universal macOS DMG from the latest GitHub release, open it, and drag
+`Damon.app` to Applications. The first public build is ad-hoc signed so its
+nested runtime cannot be altered unnoticed, but it is not Apple-notarized yet.
+On first launch, Control-click Damon and choose **Open** if Gatekeeper asks.
+
+The app is a deliberately small native chat window. Type ordinary English and
+Damon replies with structured results from the local runtime. Conversation is
+the interface; internal commands, tool IDs, capability IDs, and semantic graphs
+are never shown. Live memory remains on your Mac under `~/.damon/`.
+
+### Build from source
+
 Install Rust 1.89 or newer and Git on macOS or Linux, then:
 
 ```bash
@@ -95,11 +109,13 @@ registry, strict bounded candidate IR, deterministic canonical CBOR, context-slo
 binding, conditional plans, structured ResultIR, exact-graph learning/reuse,
 dependency-aware cached discovery, reusable verification plans, policy checks,
 bounded subprocess lifetimes, compact learned strategy statistics, and basic
-coding inspection/testing.
+coding inspection/testing. It also includes native copy and bounded file search,
+learned verified procedures, fundamental network discovery/diagnosis/socket
+inventory, and a native macOS conversation window.
 See [semantic graphs](docs/semantic-engine.md) and the
-[implementation roadmap](docs/tao-roadmap.md) for the remaining work. Rich file
-editing, cached coding results, and learned procedures are ongoing work, not
-complete capabilities.
+[implementation roadmap](docs/tao-roadmap.md) for the remaining work. General
+source-edit synthesis and privileged packet capture are intentionally not claimed
+as complete capabilities.
 
 ## Development
 
@@ -113,3 +129,6 @@ Tests create isolated deterministic files/repositories and use no paid providers
 See [contributor guidance](CONTRIBUTING.md). The former Python implementation is
 preserved under [`legacy/python/`](legacy/python/README.md) as historical reference.
 It is not used by Tao; its separate tests remain in CI.
+
+Release builds are produced by the checked-in macOS packaging script and GitHub
+Actions workflow. See [release packaging](docs/releasing.md).

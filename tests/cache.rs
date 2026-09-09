@@ -99,3 +99,30 @@ fn entity_version_invalidates_every_dependent_entry() {
         .unwrap();
     assert!(data.memo.entries.is_empty());
 }
+
+#[test]
+fn file_inventory_is_cached_and_populates_file_world_records() {
+    let fixture = Fixture::new();
+    let project_path = fixture.project();
+    fs::write(project_path.join("alpha.rs"), "fn alpha() {}\n").unwrap();
+    let mut data = fixture.brain();
+    let project = data.register_project("fixture", &project_path).unwrap();
+    let mut action =
+        tools::action_for_capability(damon::capability::LIST_FILES, project, &data).unwrap();
+    tools::prepare(&mut action, &mut data).unwrap();
+    assert_eq!(action.args[1], "alpha.rs");
+    assert!(data.resolve("fixture:alpha.rs").is_some());
+    assert_eq!(data.memo.entries.len(), 1);
+
+    let mut second =
+        tools::action_for_capability(damon::capability::LIST_FILES, project, &data).unwrap();
+    tools::prepare(&mut second, &mut data).unwrap();
+    assert_eq!(data.memo.entries[0].hits, 1);
+
+    fs::write(project_path.join("beta.rs"), "fn beta() {}\n").unwrap();
+    let mut changed =
+        tools::action_for_capability(damon::capability::LIST_FILES, project, &data).unwrap();
+    tools::prepare(&mut changed, &mut data).unwrap();
+    assert!(changed.args[1].contains("beta.rs"));
+    assert_eq!(data.memo.entries[0].hits, 0);
+}

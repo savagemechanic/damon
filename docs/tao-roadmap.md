@@ -39,6 +39,14 @@ Delivered milestones:
   that rejects raw volatile observations.
 - Typed macOS Wi-Fi link state from bounded structured system inspection, with
   explicit unknowns for privacy-redacted fields and no permission bypass.
+- Native DNS resolution, TCP/UDP socket and process-owner inventory, and staged
+  evidence-based network diagnosis.
+- Dependency-aware file inventory, file/directory world records, canonical COPY
+  and size-constrained FIND lowering, verified native copy, and bounded search.
+- Persistent verified call/store/compare/branch/jump/return procedures that reuse
+  the normal capability, policy, execution, and verification path.
+- Native SwiftUI conversation window, private line-delimited runtime protocol,
+  Universal 2 application bundle, DMG packaging, and GitHub release automation.
 
 Remaining implementation priorities:
 
@@ -48,21 +56,17 @@ protocols and application clients. Native capability resolution replaces generic
 application automation; accessibility and pixels are escape hatches only. See
 `network-architecture.md` and `capabilities.md`.
 
-1. Populate richer file/tool/procedure/process world records from deterministic
-   discovery and extend references from projects to files and operation results.
-2. Expand the canonical semantic registry only from demonstrated needs, improve
-   entity/span resolution and calibrated evidence, and lower currently understood
-   `COPY`/constraint meanings into verified native capabilities. Preserve every
-   constraint or clarify.
-3. Extend memoization from project/test discovery into file inventory and verified
-   coding results where external-state fingerprints can prove freshness.
+1. Extend references from projects and files to richer operation-result artifacts.
+2. Expand the canonical semantic registry only from demonstrated needs and
+   improve entity/span resolution and calibrated evidence.
+3. Extend memoization to more verified coding results where external-state
+   fingerprints can prove freshness.
 4. Apply learned rankings to more choice points while preserving hard local-first,
    policy, dependency, and verification constraints.
-5. Represent verified repeated procedures as tiny call/store/compare/branch/
-   jump/return instruction arrays, through the same policy/execution path.
-6. Finish the coding loop: locate/register projects, inspect/search/read files,
+5. Finish the general coding loop: locate/register projects, inspect/search/read files,
    discover lint/typecheck/build, propose/apply minimal edits, verify scope,
    rerun relevant checks, and preserve Git state without implicit commits.
+6. Add explicitly enabled, bounded packet capture and higher protocol interpreters.
 7. Improve deterministic English rendering and compact relevant teacher context.
 8. Harden boundary/failure cases continuously, keep format migration/fixtures and
    architecture docs current, pass local and CI checks, and push only `tao`.

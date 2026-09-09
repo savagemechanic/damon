@@ -6,7 +6,10 @@ pub struct Policy {
 impl Default for Policy {
     fn default() -> Self {
         Self {
-            allowed: Effects::READ.union(Effects::PROCESS),
+            allowed: Effects::READ
+                .union(Effects::PROCESS)
+                .union(Effects::NETWORK)
+                .union(Effects::WRITE),
         }
     }
 }

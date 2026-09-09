@@ -1,0 +1,50 @@
+name: macOS Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - tao
+    paths:
+      - release/version
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  dmg:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.89.0'
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: ./scripts/build-macos-dmg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Damon-macOS-Universal
+          path: |
+            target/release-package/*.dmg
+            target/release-package/*.sha256
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="v$(cat release/version)"
+          if gh release view "$version" >/dev/null 2>&1; then
+            gh release upload "$version" target/release-package/*.dmg target/release-package/*.sha256 --clobber
+          else
+            gh release create "$version" \
+              target/release-package/*.dmg \
+              target/release-package/*.sha256 \
+              --target "$GITHUB_SHA" \
+              --title "Damon $version" \
+              --generate-notes
+          fi

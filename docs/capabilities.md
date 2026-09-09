@@ -36,10 +36,11 @@ implementation of the declared capability. Native verified implementations beat
 application references, and generated implementations do not resolve merely
 because they compiled.
 
-The initial canonical graph covers current Git/file/test tools and reserves
+The canonical graph covers current Git/file/test tools and reserves
 fundamental interface, route, neighbor, socket, packet-capture, TCP, and UDP
-capabilities. Interface, route, and passive neighbor capabilities now resolve to verified native
-tools; the canonical semantic IR never sees those tool bindings. Alias registration,
-learned composite instructions, isolated source
-artifact management, rollback, and the full acquisition loop remain subsequent
-work.
+capabilities. Interface, route, passive neighbor, socket inventory, staged network
+diagnosis, file copy, and bounded file discovery resolve to verified native tools;
+the canonical semantic IR never sees those tool bindings. Verified repeated
+multi-action plans persist as compact capability instructions and reenter the
+same policy and verification path on reuse. Isolated generated-source artifact
+management, rollback, and the full primitive-acquisition loop remain future work.

@@ -2,7 +2,7 @@
 //! the integer identity is the contract and IDs are never recycled.
 use crate::types::ConceptId;
 
-pub const VERSION: u16 = 2;
+pub const VERSION: u16 = 3;
 const LOCAL_MASK: u32 = 0x00ff_ffff;
 
 pub const ACTION_NAMESPACE: u32 = 0x0100_0000;
@@ -22,6 +22,8 @@ pub const INSPECT_ROUTES: ConceptId = ConceptId(ACTION_NAMESPACE | 7);
 pub const COPY: ConceptId = ConceptId(ACTION_NAMESPACE | 8);
 pub const FIND: ConceptId = ConceptId(ACTION_NAMESPACE | 9);
 pub const INSPECT_NEIGHBORS: ConceptId = ConceptId(ACTION_NAMESPACE | 10);
+pub const DIAGNOSE_NETWORK: ConceptId = ConceptId(ACTION_NAMESPACE | 11);
+pub const LIST_SOCKETS: ConceptId = ConceptId(ACTION_NAMESPACE | 12);
 
 pub const TARGET: ConceptId = ConceptId(PREDICATE_NAMESPACE | 1);
 pub const OBJECT: ConceptId = ConceptId(PREDICATE_NAMESPACE | 2);
@@ -67,6 +69,8 @@ pub fn name(id: ConceptId) -> Option<&'static str> {
         COPY => "COPY",
         FIND => "FIND",
         INSPECT_NEIGHBORS => "INSPECT_NEIGHBORS",
+        DIAGNOSE_NETWORK => "DIAGNOSE_NETWORK",
+        LIST_SOCKETS => "LIST_SOCKETS",
         TARGET => "TARGET",
         OBJECT => "OBJECT",
         SOURCE => "SOURCE",
@@ -100,6 +104,8 @@ pub fn action_to_intent(id: ConceptId) -> Option<crate::types::IntentId> {
         INSPECT_INTERFACES => crate::types::IntentId(6),
         INSPECT_ROUTES => crate::types::IntentId(7),
         INSPECT_NEIGHBORS => crate::types::IntentId(8),
+        DIAGNOSE_NETWORK => crate::types::IntentId(9),
+        LIST_SOCKETS => crate::types::IntentId(10),
         COPY | FIND => return None,
         _ => return None,
     })
@@ -115,6 +121,8 @@ pub fn intent_to_action(id: crate::types::IntentId) -> Option<ConceptId> {
         6 => INSPECT_INTERFACES,
         7 => INSPECT_ROUTES,
         8 => INSPECT_NEIGHBORS,
+        9 => DIAGNOSE_NETWORK,
+        10 => LIST_SOCKETS,
         _ => return None,
     })
 }

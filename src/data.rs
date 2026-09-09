@@ -6,7 +6,8 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-const MAGIC: &[u8; 8] = b"DAMON\0\x08\0";
+const MAGIC: &[u8; 8] = b"DAMON\0\x09\0";
+const NETWORK: &[u8; 8] = b"DAMON\0\x08\0";
 const SEMANTIC: &[u8; 8] = b"DAMON\0\x07\0";
 const CAPABILITY: &[u8; 8] = b"DAMON\0\x06\0";
 const STRATEGY: &[u8; 8] = b"DAMON\0\x05\0";
@@ -43,6 +44,7 @@ pub struct DamonData {
     pub memo: crate::cache::MemoTable,
     pub strategies: crate::strategy::StrategyTable,
     pub capabilities: crate::capability::CapabilityGraph,
+    pub procedures: crate::procedure::ProcedureTable,
     pub semantic_registry_version: u16,
     pub network_knowledge: crate::network::topology::Topology,
 }
@@ -77,6 +79,7 @@ impl DamonData {
             memo: crate::cache::MemoTable::default(),
             strategies: crate::strategy::StrategyTable::default(),
             capabilities: crate::capability::CapabilityGraph::default(),
+            procedures: crate::procedure::ProcedureTable::default(),
             semantic_registry_version: crate::semantic_registry::VERSION,
             network_knowledge: crate::network::topology::Topology::default(),
         }
@@ -415,6 +418,7 @@ impl DamonData {
         self.capabilities.encode(&mut f)?;
         write_u16(&mut f, self.semantic_registry_version)?;
         self.network_knowledge.encode(&mut f)?;
+        self.procedures.encode(&mut f)?;
         if f.len() > storage::MAX_IMAGE {
             return Err(storage::invalid("brain image exceeds size limit"));
         }
@@ -424,6 +428,7 @@ impl DamonData {
         let mut r = Reader { bytes, pos: 0 };
         let header = r.take(8)?;
         if header != MAGIC
+            && header != NETWORK
             && header != SEMANTIC
             && header != CAPABILITY
             && header != STRATEGY
@@ -476,6 +481,7 @@ impl DamonData {
             });
         }
         if header == MAGIC
+            || header == NETWORK
             || header == SEMANTIC
             || header == CAPABILITY
             || header == STRATEGY
@@ -530,6 +536,7 @@ impl DamonData {
             }
         }
         if header == MAGIC
+            || header == NETWORK
             || header == SEMANTIC
             || header == CAPABILITY
             || header == STRATEGY
@@ -541,6 +548,7 @@ impl DamonData {
             data.world.rebuild(data.entities.len())?;
         }
         if header == MAGIC
+            || header == NETWORK
             || header == SEMANTIC
             || header == CAPABILITY
             || header == STRATEGY
@@ -548,13 +556,18 @@ impl DamonData {
         {
             data.memo = crate::cache::MemoTable::decode(&mut r, &data.entities)?;
         }
-        if header == MAGIC || header == SEMANTIC || header == CAPABILITY || header == STRATEGY {
+        if header == MAGIC
+            || header == NETWORK
+            || header == SEMANTIC
+            || header == CAPABILITY
+            || header == STRATEGY
+        {
             data.strategies = crate::strategy::StrategyTable::decode(&mut r)?;
         }
-        if header == MAGIC || header == SEMANTIC || header == CAPABILITY {
+        if header == MAGIC || header == NETWORK || header == SEMANTIC || header == CAPABILITY {
             data.capabilities = crate::capability::CapabilityGraph::decode(&mut r)?;
         }
-        if header == MAGIC || header == SEMANTIC {
+        if header == MAGIC || header == NETWORK || header == SEMANTIC {
             let stored_registry_version = r.u16()?;
             if stored_registry_version == 0
                 || stored_registry_version > crate::semantic_registry::VERSION
@@ -563,8 +576,11 @@ impl DamonData {
             }
             data.semantic_registry_version = crate::semantic_registry::VERSION;
         }
-        if header == MAGIC {
+        if header == MAGIC || header == NETWORK {
             data.network_knowledge = crate::network::topology::Topology::decode(&mut r)?;
+        }
+        if header == MAGIC {
+            data.procedures = crate::procedure::ProcedureTable::decode(&mut r, &data.capabilities)?;
         }
         for alias in &data.world.aliases {
             if data
@@ -628,12 +644,19 @@ mod tests {
             let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
         }
         let d = DamonData::open(&p).unwrap();
-        let (memo_len, strategy_len, capability_len) = tail_lengths(&d);
+        let (memo_len, strategy_len, capability_len, network_len, procedure_len) = tail_lengths(&d);
         drop(d);
         let image = fs::read(&p).unwrap();
         let (generation, payload, _) = storage::unframe(&image).unwrap();
         assert_eq!(&payload[..8], MAGIC);
-        let mut old = payload[..payload.len() - memo_len - strategy_len - capability_len].to_vec();
+        let mut old = payload[..payload.len()
+            - memo_len
+            - strategy_len
+            - capability_len
+            - 2
+            - network_len
+            - procedure_len]
+            .to_vec();
         old[..8].copy_from_slice(WORLD);
         fs::write(&p, storage::frame(generation, &old).unwrap()).unwrap();
 
@@ -657,11 +680,13 @@ mod tests {
             let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
         }
         let d = DamonData::open(&p).unwrap();
-        let (_, strategy_len, capability_len) = tail_lengths(&d);
+        let (_, strategy_len, capability_len, network_len, procedure_len) = tail_lengths(&d);
         drop(d);
         let image = fs::read(&p).unwrap();
         let (generation, payload, _) = storage::unframe(&image).unwrap();
-        let mut old = payload[..payload.len() - strategy_len - capability_len].to_vec();
+        let mut old = payload
+            [..payload.len() - strategy_len - capability_len - 2 - network_len - procedure_len]
+            .to_vec();
         old[..8].copy_from_slice(MEMO);
         fs::write(&p, storage::frame(generation, &old).unwrap()).unwrap();
 
@@ -685,11 +710,12 @@ mod tests {
             let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
         }
         let d = DamonData::open(&p).unwrap();
-        let (_, _, capability_len) = tail_lengths(&d);
+        let (_, _, capability_len, network_len, procedure_len) = tail_lengths(&d);
         drop(d);
         let image = fs::read(&p).unwrap();
         let (generation, payload, _) = storage::unframe(&image).unwrap();
-        let mut old = payload[..payload.len() - capability_len].to_vec();
+        let mut old =
+            payload[..payload.len() - capability_len - 2 - network_len - procedure_len].to_vec();
         old[..8].copy_from_slice(STRATEGY);
         fs::write(&p, storage::frame(generation, &old).unwrap()).unwrap();
 
@@ -733,11 +759,12 @@ mod tests {
             .unwrap()
             .effects = crate::types::Effects::READ;
         d.compact().unwrap();
-        let tail_len = network_tail_len(&d);
+        let network_len = network_payload_len(&d);
+        let procedure_len = procedure_payload_len(&d);
         drop(d);
         let image = fs::read(&p).unwrap();
         let (generation, payload, _) = storage::unframe(&image).unwrap();
-        let mut old = payload[..payload.len() - tail_len].to_vec();
+        let mut old = payload[..payload.len() - 2 - network_len - procedure_len].to_vec();
         old[..8].copy_from_slice(CAPABILITY);
         fs::write(&p, storage::frame(generation, &old).unwrap()).unwrap();
 
@@ -779,15 +806,17 @@ mod tests {
         let mut d = DamonData::open(&p).unwrap();
         d.compact().unwrap();
         let network_len = network_payload_len(&d);
+        let procedure_len = procedure_payload_len(&d);
         drop(d);
         let image = fs::read(&p).unwrap();
         let (generation, payload, _) = storage::unframe(&image).unwrap();
-        let mut old = payload[..payload.len() - network_len].to_vec();
+        let mut old = payload[..payload.len() - network_len - procedure_len].to_vec();
         old[..8].copy_from_slice(SEMANTIC);
         fs::write(&p, storage::frame(generation, &old).unwrap()).unwrap();
 
         let mut migrated = DamonData::open(&p).unwrap();
         assert!(migrated.network_knowledge.facts.is_empty());
+        assert!(migrated.procedures.procedures.is_empty());
         migrated.compact().unwrap();
         drop(migrated);
         let image = fs::read(&p).unwrap();
@@ -798,27 +827,61 @@ mod tests {
         }
     }
 
-    fn tail_lengths(data: &DamonData) -> (usize, usize, usize) {
+    #[test]
+    fn revision_eight_network_image_migrates_to_procedure_table() {
+        let p =
+            std::env::temp_dir().join(format!("damon-v8-migration-{}.data", std::process::id()));
+        for suffix in ["", ".journal", ".prev", ".lock"] {
+            let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
+        }
+        let d = DamonData::open(&p).unwrap();
+        let procedure_len = procedure_payload_len(&d);
+        drop(d);
+        let image = fs::read(&p).unwrap();
+        let (generation, payload, _) = storage::unframe(&image).unwrap();
+        let mut old = payload[..payload.len() - procedure_len].to_vec();
+        old[..8].copy_from_slice(NETWORK);
+        fs::write(&p, storage::frame(generation, &old).unwrap()).unwrap();
+
+        let mut migrated = DamonData::open(&p).unwrap();
+        assert!(migrated.procedures.procedures.is_empty());
+        migrated.compact().unwrap();
+        drop(migrated);
+        let image = fs::read(&p).unwrap();
+        let (_, payload, _) = storage::unframe(&image).unwrap();
+        assert_eq!(&payload[..8], MAGIC);
+        for suffix in ["", ".journal", ".prev", ".lock"] {
+            let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
+        }
+    }
+
+    fn tail_lengths(data: &DamonData) -> (usize, usize, usize, usize, usize) {
         let mut memo = Vec::new();
         data.memo.encode(&mut memo).unwrap();
         let mut strategy = Vec::new();
         data.strategies.encode(&mut strategy).unwrap();
         let mut capability = Vec::new();
         data.capabilities.encode(&mut capability).unwrap();
+        let network_len = network_payload_len(data);
+        let procedure_len = procedure_payload_len(data);
         (
             memo.len(),
             strategy.len(),
-            capability.len() + network_tail_len(data),
+            capability.len(),
+            network_len,
+            procedure_len,
         )
-    }
-
-    fn network_tail_len(data: &DamonData) -> usize {
-        2 + network_payload_len(data)
     }
 
     fn network_payload_len(data: &DamonData) -> usize {
         let mut network = Vec::new();
         data.network_knowledge.encode(&mut network).unwrap();
         network.len()
+    }
+
+    fn procedure_payload_len(data: &DamonData) -> usize {
+        let mut procedure = Vec::new();
+        data.procedures.encode(&mut procedure).unwrap();
+        procedure.len()
     }
 }

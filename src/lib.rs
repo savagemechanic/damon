@@ -7,6 +7,7 @@ pub mod learning;
 pub mod model;
 pub mod network;
 pub mod policy;
+pub mod procedure;
 pub mod reason;
 pub mod runtime;
 pub mod tools;

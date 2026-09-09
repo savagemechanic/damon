@@ -356,6 +356,132 @@ pub fn bind_context(
     })
 }
 
+/// Lower native meanings that carry source spans or typed constraints and
+/// therefore cannot pass through the older persistent MeaningGraph shape.
+/// Capability/tool selection remains Damon-owned after full validation.
+pub fn native_plan(
+    ir: &CandidateIr,
+    request: &SemanticRequest,
+    data: &DamonData,
+) -> Result<Option<crate::reason::Plan>, String> {
+    let bound = bind_context(ir, request, data)?;
+    let Some((action_index, action)) = ir
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, node)| node.kind == NodeKind::Action)
+        .map(|(index, node)| (index, ConceptId(node.concept)))
+    else {
+        return Ok(None);
+    };
+    let (capability, target, args) = match action {
+        registry::COPY => {
+            let source_node = edge_target(ir, action_index, registry::SOURCE)?;
+            let destination_node = edge_target(ir, action_index, registry::DESTINATION)?;
+            let object_node = edge_target(ir, action_index, registry::OBJECT)?;
+            let source = persistent_binding(&bound, source_node)?;
+            let destination = persistent_binding(&bound, destination_node)?;
+            let span = ir.nodes[object_node]
+                .span
+                .ok_or("copy object must reference the user's input")?;
+            let mention = &request.input[usize::from(span.start)..usize::from(span.end)];
+            let source_path = &data
+                .entity(source)
+                .ok_or("copy source no longer exists")?
+                .value;
+            let destination_path = &data
+                .entity(destination)
+                .ok_or("copy destination no longer exists")?
+                .value;
+            (
+                crate::capability::COPY_FILE,
+                Some(source),
+                vec![
+                    source_path.clone(),
+                    mention.to_string(),
+                    destination_path.clone(),
+                ],
+            )
+        }
+        registry::FIND => {
+            let target = request
+                .focus_slot
+                .and_then(|slot| {
+                    request
+                        .slots
+                        .iter()
+                        .find(|candidate| candidate.slot == slot)
+                })
+                .filter(|slot| slot.kind == registry::PROJECT)
+                .or_else(|| {
+                    request
+                        .slots
+                        .iter()
+                        .find(|slot| slot.kind == registry::PROJECT)
+                })
+                .ok_or("Which project should I search?")?
+                .entity;
+            let constraint = edge_target(ir, action_index, registry::REQUIRES)?;
+            let value = edge_target(ir, constraint, registry::VALUE)?;
+            let minimum = ir.nodes[value].value;
+            let root = data
+                .entity(target)
+                .ok_or("search target no longer exists")?
+                .value
+                .clone();
+            (
+                crate::capability::FIND_FILES,
+                Some(target),
+                vec![root, minimum.to_string()],
+            )
+        }
+        _ => return Ok(None),
+    };
+    let tool = data
+        .capabilities
+        .resolve_tool(capability)
+        .ok_or("capability has no verified native implementation")?;
+    let action = crate::types::Action {
+        capability,
+        tool,
+        target,
+        effects: crate::tools::required_effects(tool)?,
+        args,
+    };
+    Ok(Some(crate::reason::Plan {
+        actions: vec![action],
+        dependencies: Vec::new(),
+    }))
+}
+
+fn edge_target(ir: &CandidateIr, source: usize, predicate: ConceptId) -> Result<usize, String> {
+    ir.edges
+        .iter()
+        .find(|edge| edge.source as usize == source && edge.predicate == predicate.0)
+        .map(|edge| edge.target as usize)
+        .ok_or_else(|| {
+            format!(
+                "{} is missing",
+                registry::name(predicate).unwrap_or("argument")
+            )
+        })
+}
+
+fn persistent_binding(
+    bound: &BoundSemanticIr,
+    node: usize,
+) -> Result<crate::types::EntityId, String> {
+    match bound
+        .entities
+        .iter()
+        .find(|(index, _)| usize::from(*index) == node)
+        .map(|(_, binding)| *binding)
+    {
+        Some(EntityBinding::Persistent(entity)) => Ok(entity),
+        _ => Err("entity argument did not bind to an exposed persistent entity".into()),
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WireResolution {
@@ -418,6 +544,8 @@ pub fn request(input: &str, data: &DamonData) -> SemanticRequest {
         (registry::INSPECT_INTERFACES, ["network", "connected"]),
         (registry::INSPECT_ROUTES, ["gateway", "traffic"]),
         (registry::INSPECT_NEIGHBORS, ["devices", "neighbors"]),
+        (registry::DIAGNOSE_NETWORK, ["internet", "dns"]),
+        (registry::LIST_SOCKETS, ["sockets", "talking"]),
         (registry::COPY, ["copy", "duplicate"]),
         (registry::FIND, ["find", "larger"]),
     ];
@@ -885,6 +1013,8 @@ fn validate_requirements(ir: &CandidateIr) -> Result<(), String> {
                     registry::INSPECT_INTERFACES
                         | registry::INSPECT_ROUTES
                         | registry::INSPECT_NEIGHBORS
+                        | registry::DIAGNOSE_NETWORK
+                        | registry::LIST_SOCKETS
                 ) && target_kind(registry::TARGET) != Some(registry::HOST) =>
             {
                 return Err("network action target must be a host".into())

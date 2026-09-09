@@ -19,6 +19,9 @@ pub const LIST_SOCKETS: CapabilityId = CapabilityId(9);
 pub const CAPTURE_PACKETS: CapabilityId = CapabilityId(10);
 pub const TCP_CONNECT: CapabilityId = CapabilityId(11);
 pub const UDP_EXCHANGE: CapabilityId = CapabilityId(12);
+pub const DIAGNOSE_NETWORK: CapabilityId = CapabilityId(13);
+pub const COPY_FILE: CapabilityId = CapabilityId(14);
+pub const FIND_FILES: CapabilityId = CapabilityId(15);
 const MAX_CAPABILITIES: usize = 4096;
 const MAX_IMPLEMENTATIONS: usize = 8192;
 const MAX_DEPENDENCIES: usize = 16384;
@@ -158,7 +161,7 @@ impl CapabilityGraph {
                 LIST_SOCKETS,
                 "list sockets",
                 Effects::READ.union(Effects::PROCESS),
-                None,
+                Some(ToolId(10)),
             ),
             (
                 CAPTURE_PACKETS,
@@ -168,6 +171,19 @@ impl CapabilityGraph {
             ),
             (TCP_CONNECT, "connect tcp", Effects::NETWORK, None),
             (UDP_EXCHANGE, "exchange udp", Effects::NETWORK, None),
+            (
+                DIAGNOSE_NETWORK,
+                "diagnose network",
+                Effects::READ.union(Effects::NETWORK),
+                Some(ToolId(9)),
+            ),
+            (
+                COPY_FILE,
+                "copy file",
+                Effects::READ.union(Effects::WRITE),
+                Some(ToolId(11)),
+            ),
+            (FIND_FILES, "find files", Effects::READ, Some(ToolId(12))),
         ] {
             graph.capabilities.push(Capability {
                 id,
@@ -228,40 +244,39 @@ impl CapabilityGraph {
     }
 
     pub(crate) fn reconcile_builtins(&mut self) -> io::Result<()> {
-        for (capability, tool, effects) in [
-            (INSPECT_INTERFACES, ToolId(6), Effects::READ),
-            (
-                INSPECT_ROUTES,
-                ToolId(7),
-                Effects::READ.union(Effects::PROCESS),
-            ),
-            (
-                INSPECT_NEIGHBORS,
-                ToolId(8),
-                Effects::READ.union(Effects::PROCESS),
-            ),
-        ] {
-            let row = self
+        let canonical = Self::builtins();
+        for built_in in canonical.capabilities {
+            if let Some(row) = self
                 .capabilities
                 .iter_mut()
-                .find(|row| row.id == capability)
-                .ok_or_else(|| storage::invalid("missing built-in capability"))?;
-            row.effects = effects;
-            row.version = row.version.max(2);
+                .find(|row| row.id == built_in.id)
+            {
+                row.effects = built_in.effects;
+                row.version = row.version.max(built_in.version);
+                self.names.insert(row.name.clone(), row.id);
+            } else if built_in.id.0 == self.capabilities.len() as u32 + 1 {
+                self.names.insert(built_in.name.clone(), built_in.id);
+                self.capabilities.push(built_in);
+            } else {
+                return Err(storage::invalid("missing non-tail built-in capability"));
+            }
+        }
+        for built_in in canonical.implementations {
             if !self.implementations.iter().any(|implementation| {
-                implementation.capability == capability
-                    && implementation.kind == ImplementationKind::Native
-                    && implementation.tool == Some(tool)
+                implementation.capability == built_in.capability
+                    && implementation.kind == built_in.kind
+                    && implementation.tool == built_in.tool
+                    && implementation.procedure == built_in.procedure
                     && implementation.verification == Verification::Verified
             }) {
                 self.add_implementation(
                     NewImplementation {
-                        capability,
-                        kind: ImplementationKind::Native,
-                        tool: Some(tool),
-                        procedure: None,
-                        verification: Verification::Verified,
-                        provenance: Provenance::BuiltIn,
+                        capability: built_in.capability,
+                        kind: built_in.kind,
+                        tool: built_in.tool,
+                        procedure: built_in.procedure,
+                        verification: built_in.verification,
+                        provenance: built_in.provenance,
                     },
                     &[],
                 )?;
@@ -447,6 +462,8 @@ pub fn for_intent(intent: crate::types::IntentId) -> Option<CapabilityId> {
         6 => INSPECT_INTERFACES,
         7 => INSPECT_ROUTES,
         8 => INSPECT_NEIGHBORS,
+        9 => DIAGNOSE_NETWORK,
+        10 => LIST_SOCKETS,
         _ => return None,
     })
 }
@@ -516,7 +533,7 @@ mod tests {
         graph
             .add_implementation(
                 NewImplementation {
-                    capability: LIST_SOCKETS,
+                    capability: CAPTURE_PACKETS,
                     kind: ImplementationKind::Generated,
                     tool: Some(ToolId(100)),
                     procedure: None,
@@ -526,6 +543,18 @@ mod tests {
                 &[],
             )
             .unwrap();
-        assert!(graph.resolve(LIST_SOCKETS).is_none());
+        assert!(graph.resolve(CAPTURE_PACKETS).is_none());
+    }
+
+    #[test]
+    fn reconciliation_appends_new_tail_builtins_to_an_old_brain() {
+        let mut graph = CapabilityGraph::builtins();
+        graph
+            .implementations
+            .retain(|implementation| implementation.capability != DIAGNOSE_NETWORK);
+        graph.capabilities.pop();
+        graph.names.remove("diagnose network");
+        graph.reconcile_builtins().unwrap();
+        assert_eq!(graph.resolve_tool(DIAGNOSE_NETWORK), Some(ToolId(9)));
     }
 }

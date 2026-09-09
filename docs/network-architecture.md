@@ -42,6 +42,11 @@ cryptography.
   original buffer;
 - bounded Ethernet dispatch into ARP, IPv4, IPv6, TCP, UDP, and ICMP metadata;
 - bounded TCP connect/listen/accept/send/receive/close and UDP bind/send/receive;
+- safe system DNS resolution to typed addresses, without making DNS or HTTP the
+  network foundation;
+- typed TCP/UDP socket inventory with Linux and macOS process-owner resolution;
+- a deterministic staged diagnosis over interface, address, route, DNS, and
+  bounded transport evidence, with distinct failure categories;
 - packet-to-connection aggregation, counters, basic TCP state, and conservative
   protocol guesses.
 
@@ -79,11 +84,9 @@ the encoder rejects accidental persistence of raw observations.
 ## Remaining integration order
 
 1. Richer IPv6 neighbor state where directly available.
-2. Socket/process inventory and owner resolution.
-3. Explicit bounded packet observation behind policy.
-4. DNS resolution/protocol parsing, DHCP observations, and staged diagnostics.
-5. Expand natural-language route/interface meanings into staged diagnosis.
-7. TLS metadata, HTTP, SSH, router management, and security as compositions over
+2. Explicit bounded packet observation behind policy.
+3. DNS packet parsing and DHCP observations.
+4. TLS metadata, HTTP, SSH, router management, and security as compositions over
    lower layers.
 
 No higher-layer client may become the architectural shortcut around this order.

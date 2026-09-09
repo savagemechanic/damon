@@ -3,9 +3,12 @@
 //! Higher protocols consume these representations; they do not define them.
 pub mod address;
 pub mod connection;
+pub mod diagnosis;
 pub mod interface;
+pub mod inventory;
 pub mod neighbor;
 pub mod packet;
+pub mod protocol;
 pub mod route;
 pub mod socket;
 pub mod topology;

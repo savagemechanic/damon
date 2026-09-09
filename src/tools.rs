@@ -12,6 +12,10 @@ pub const TOOL_LIST_FILES: ToolId = ToolId(4);
 pub const TOOL_NETWORK_INTERFACES: ToolId = ToolId(6);
 pub const TOOL_NETWORK_ROUTES: ToolId = ToolId(7);
 pub const TOOL_NETWORK_NEIGHBORS: ToolId = ToolId(8);
+pub const TOOL_NETWORK_DIAGNOSE: ToolId = ToolId(9);
+pub const TOOL_LIST_SOCKETS: ToolId = ToolId(10);
+pub const TOOL_COPY_FILE: ToolId = ToolId(11);
+pub const TOOL_FIND_FILES: ToolId = ToolId(12);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandSpec {
@@ -78,6 +82,14 @@ pub fn action_for(
 ) -> Result<Action, String> {
     let capability =
         crate::capability::for_intent(intent).ok_or("meaning has no known native capability")?;
+    action_for_capability(capability, target, data)
+}
+
+pub fn action_for_capability(
+    capability: crate::types::CapabilityId,
+    target: crate::types::EntityId,
+    data: &DamonData,
+) -> Result<Action, String> {
     let tool = data
         .capabilities
         .resolve_tool(capability)
@@ -89,7 +101,11 @@ pub fn action_for(
         {
             vec![entity.value.clone()]
         }
-        TOOL_NETWORK_INTERFACES | TOOL_NETWORK_ROUTES | TOOL_NETWORK_NEIGHBORS
+        TOOL_NETWORK_INTERFACES
+        | TOOL_NETWORK_ROUTES
+        | TOOL_NETWORK_NEIGHBORS
+        | TOOL_NETWORK_DIAGNOSE
+        | TOOL_LIST_SOCKETS
             if entity.kind == crate::world::HOST =>
         {
             Vec::new()
@@ -111,6 +127,10 @@ pub fn required_effects(tool: ToolId) -> Result<Effects, String> {
         6 => Ok(Effects::READ),
         7 => Ok(Effects::READ.union(Effects::PROCESS)),
         8 => Ok(Effects::READ.union(Effects::PROCESS)),
+        9 => Ok(Effects::READ.union(Effects::NETWORK)),
+        10 => Ok(Effects::READ.union(Effects::PROCESS)),
+        11 => Ok(Effects::READ.union(Effects::WRITE)),
+        12 => Ok(Effects::READ),
         _ => Err("unknown tool".into()),
     }
 }
@@ -124,6 +144,10 @@ pub fn capability_for_tool(tool: ToolId) -> Option<crate::types::CapabilityId> {
         TOOL_NETWORK_INTERFACES => crate::capability::INSPECT_INTERFACES,
         TOOL_NETWORK_ROUTES => crate::capability::INSPECT_ROUTES,
         TOOL_NETWORK_NEIGHBORS => crate::capability::INSPECT_NEIGHBORS,
+        TOOL_NETWORK_DIAGNOSE => crate::capability::DIAGNOSE_NETWORK,
+        TOOL_LIST_SOCKETS => crate::capability::LIST_SOCKETS,
+        TOOL_COPY_FILE => crate::capability::COPY_FILE,
+        TOOL_FIND_FILES => crate::capability::FIND_FILES,
         _ => return None,
     })
 }
@@ -145,11 +169,23 @@ pub fn execute(action: &Action, policy: &crate::policy::Policy) -> ToolResult {
             &["--no-pager", "diff", "--no-ext-diff", "--", "."],
         ),
         TOOL_TEST => run_tests(action),
-        TOOL_LIST_FILES => list_files(cwd),
+        TOOL_LIST_FILES => action.args.get(1).map_or_else(
+            || list_files(cwd),
+            |cached| ToolResult {
+                success: true,
+                stdout: cached.clone(),
+                stderr: String::new(),
+                code: Some(0),
+            },
+        ),
         ToolId(5) => changed_files(cwd),
         TOOL_NETWORK_INTERFACES => inspect_interfaces(),
         TOOL_NETWORK_ROUTES => inspect_routes(),
         TOOL_NETWORK_NEIGHBORS => inspect_neighbors(),
+        TOOL_NETWORK_DIAGNOSE => diagnose_network(),
+        TOOL_LIST_SOCKETS => inspect_sockets(),
+        TOOL_COPY_FILE => copy_file(action),
+        TOOL_FIND_FILES => find_files(action),
         _ => ToolResult {
             success: false,
             stdout: String::new(),
@@ -285,6 +321,204 @@ fn inspect_neighbors() -> ToolResult {
     }
 }
 
+fn diagnose_network() -> ToolResult {
+    let evidence = crate::network::diagnosis::internet();
+    let success = evidence.last().is_some_and(|stage| stage.passed);
+    let stdout = evidence
+        .iter()
+        .map(|stage| {
+            let name = format!("{:?}", stage.stage).to_ascii_lowercase();
+            let status = if stage.passed { "passed" } else { "failed" };
+            format!("{name}: {status} — {}", stage.detail)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    ToolResult {
+        success,
+        stdout: if success {
+            stdout.clone()
+        } else {
+            String::new()
+        },
+        stderr: if success { String::new() } else { stdout },
+        code: success.then_some(0),
+    }
+}
+
+fn inspect_sockets() -> ToolResult {
+    match crate::network::inventory::discover() {
+        Ok(sockets) => {
+            let lines = sockets
+                .iter()
+                .take(500)
+                .map(|socket| {
+                    let transport = format!("{:?}", socket.transport).to_ascii_lowercase();
+                    let owner = match (&socket.process_name, socket.process_id) {
+                        (Some(name), Some(pid)) => format!("{name} (PID {pid})"),
+                        (_, Some(pid)) => format!("PID {pid}"),
+                        _ => "owner not visible".into(),
+                    };
+                    let remote = socket.remote.as_ref().map_or_else(
+                        || "not connected".into(),
+                        crate::network::inventory::render_endpoint,
+                    );
+                    format!(
+                        "{owner}: {transport} {} → {remote} ({})",
+                        crate::network::inventory::render_endpoint(&socket.local),
+                        socket.state.to_ascii_lowercase()
+                    )
+                })
+                .collect::<Vec<_>>();
+            ToolResult {
+                success: true,
+                stdout: if lines.is_empty() {
+                    "No visible TCP or UDP sockets were observed.".into()
+                } else {
+                    lines.join("\n")
+                },
+                stderr: String::new(),
+                code: Some(0),
+            }
+        }
+        Err(error) => tool_error("Socket inventory failed", error),
+    }
+}
+
+fn copy_file(action: &Action) -> ToolResult {
+    let [root, mention, destination] = action.args.as_slice() else {
+        return tool_error(
+            "File copy failed",
+            "copy requires source root, file, and destination",
+        );
+    };
+    match copy_file_inner(Path::new(root), mention, Path::new(destination)) {
+        Ok(path) => ToolResult {
+            success: true,
+            stdout: format!("Copied and verified {}.", path.display()),
+            stderr: String::new(),
+            code: Some(0),
+        },
+        Err(error) => tool_error("File copy failed", error),
+    }
+}
+
+fn copy_file_inner(
+    root: &Path,
+    mention: &str,
+    destination: &Path,
+) -> io::Result<std::path::PathBuf> {
+    let relative = Path::new(mention);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the file mention must be a relative path without traversal",
+        ));
+    }
+    let root = fs::canonicalize(root)?;
+    let source = fs::canonicalize(root.join(relative))?;
+    if !source.starts_with(&root) || !source.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "the source is not a file inside the named project",
+        ));
+    }
+    let destination = fs::canonicalize(destination)?;
+    if !destination.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the destination is not a directory",
+        ));
+    }
+    let name = source
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "source has no file name"))?;
+    let output = destination.join(name);
+    let mut input = fs::File::open(&source)?;
+    let mut created = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&output)?;
+    let copied = io::copy(&mut input, &mut created);
+    if let Err(error) = copied {
+        drop(created);
+        let _ = fs::remove_file(&output);
+        return Err(error);
+    }
+    created.sync_all()?;
+    if fs::read(&source)? != fs::read(&output)? {
+        let _ = fs::remove_file(&output);
+        return Err(io::Error::other("copied bytes did not verify"));
+    }
+    Ok(output)
+}
+
+fn find_files(action: &Action) -> ToolResult {
+    let [root, minimum] = action.args.as_slice() else {
+        return tool_error(
+            "File search failed",
+            "search requires a root and minimum byte size",
+        );
+    };
+    let minimum = match minimum.parse::<u64>() {
+        Ok(minimum) => minimum,
+        Err(error) => return tool_error("File search failed", error),
+    };
+    match find_files_larger_than(Path::new(root), minimum) {
+        Ok(files) => ToolResult {
+            success: true,
+            stdout: if files.is_empty() {
+                format!("No files larger than {minimum} bytes were found.")
+            } else {
+                files.join("\n")
+            },
+            stderr: String::new(),
+            code: Some(0),
+        },
+        Err(error) => tool_error("File search failed", error),
+    }
+}
+
+fn find_files_larger_than(root: &Path, minimum: u64) -> io::Result<Vec<String>> {
+    let root = fs::canonicalize(root)?;
+    let mut pending = vec![(root.clone(), 0_u8)];
+    let mut visited = 0_usize;
+    let mut matches = Vec::new();
+    while let Some((directory, depth)) = pending.pop() {
+        if depth >= 64 {
+            continue;
+        }
+        for entry in fs::read_dir(directory)? {
+            visited += 1;
+            if visited > 20_000 {
+                return Err(io::Error::other("file search exceeded 20,000 entries"));
+            }
+            let entry = entry?;
+            let metadata = fs::symlink_metadata(entry.path())?;
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            if metadata.is_dir() {
+                pending.push((entry.path(), depth + 1));
+            } else if metadata.is_file() && metadata.len() > minimum {
+                matches.push(
+                    entry
+                        .path()
+                        .strip_prefix(&root)
+                        .unwrap_or(&entry.path())
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+    }
+    matches.sort();
+    Ok(matches)
+}
+
 fn tool_error(context: &str, error: impl std::fmt::Display) -> ToolResult {
     ToolResult {
         success: false,
@@ -326,6 +560,9 @@ fn run_tests(action: &Action) -> ToolResult {
 /// is parsed back through a fixed allowlist, so a brain entry cannot introduce
 /// an executable or argument.
 pub fn prepare(action: &mut Action, data: &mut DamonData) -> io::Result<()> {
+    if action.tool == TOOL_LIST_FILES {
+        return prepare_file_inventory(action, data);
+    }
     if action.tool != TOOL_TEST {
         return Ok(());
     }
@@ -365,6 +602,92 @@ pub fn prepare(action: &mut Action, data: &mut DamonData) -> io::Result<()> {
     action.args.push(command.program);
     action.args.extend(command.args);
     Ok(())
+}
+
+fn prepare_file_inventory(action: &mut Action, data: &mut DamonData) -> io::Result<()> {
+    let target = action
+        .target
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file target missing"))?;
+    let root = action
+        .args
+        .first()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "project path missing"))?
+        .clone();
+    let Ok((state_hash, names)) = file_inventory(Path::new(&root)) else {
+        // Caching is an optimization. Let the real tool produce the authoritative
+        // filesystem error instead of turning discovery into verification.
+        return Ok(());
+    };
+    let key = crate::cache::key_for_project(target);
+    let cached = data
+        .memo
+        .get(crate::cache::FILE_LIST, key, state_hash, &data.entities)
+        .map(str::to_string);
+    let value = match cached {
+        Some(value) => value,
+        None => {
+            let value = names.join("\n");
+            data.memo.put(
+                crate::cache::FILE_LIST,
+                key,
+                state_hash,
+                &[target],
+                value.clone(),
+                &data.entities,
+            )?;
+            for name in names.iter().take(200) {
+                let path = Path::new(&root).join(name);
+                let kind = if path.is_dir() {
+                    crate::world::DIRECTORY
+                } else {
+                    crate::world::FILE
+                };
+                let entity = data.add_entity(
+                    kind,
+                    &format!(
+                        "{}:{name}",
+                        data.entity(target).map_or("project", |e| &e.name)
+                    ),
+                    path.to_str().ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidData, "file path is not UTF-8")
+                    })?,
+                );
+                data.link(target, crate::world::Relationship::Contains, entity)?;
+            }
+            value
+        }
+    };
+    action.args.truncate(1);
+    action.args.push(value);
+    Ok(())
+}
+
+fn file_inventory(path: &Path) -> io::Result<(u64, Vec<String>)> {
+    let mut rows = Vec::new();
+    for entry in fs::read_dir(path)?.take(4097) {
+        let entry = entry?;
+        let metadata = fs::symlink_metadata(entry.path())?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |duration| {
+                duration.as_nanos().min(u128::from(u64::MAX)) as u64
+            });
+        rows.push((name, metadata.len(), modified, u8::from(metadata.is_dir())));
+    }
+    if rows.len() > 4096 {
+        return Err(io::Error::other("file inventory exceeds 4,096 entries"));
+    }
+    rows.sort_by(|left, right| left.0.cmp(&right.0));
+    let encoded = rows
+        .iter()
+        .map(|(name, size, modified, directory)| format!("{name}\0{size}\0{modified}\0{directory}"))
+        .collect::<Vec<_>>();
+    let references = encoded.iter().map(String::as_bytes).collect::<Vec<_>>();
+    let hash = crate::cache::hash_bytes(&references);
+    Ok((hash, rows.into_iter().map(|row| row.0).take(200).collect()))
 }
 
 pub fn discover_test_command(path: &Path) -> Option<CommandSpec> {

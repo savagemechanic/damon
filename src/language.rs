@@ -13,6 +13,8 @@ pub const INTENT_CHANGED_FILES: IntentId = IntentId(5);
 pub const INTENT_NETWORK_INTERFACES: IntentId = IntentId(6);
 pub const INTENT_DEFAULT_GATEWAY: IntentId = IntentId(7);
 pub const INTENT_NETWORK_NEIGHBORS: IntentId = IntentId(8);
+pub const INTENT_NETWORK_DIAGNOSIS: IntentId = IntentId(9);
+pub const INTENT_LIST_SOCKETS: IntentId = IntentId(10);
 const BEAM_WIDTH: usize = 4;
 
 #[derive(Debug)]
@@ -107,6 +109,20 @@ fn lexical_evidence(text: &str, intent: IntentId) -> i32 {
                 || text.contains("devices the mac") =>
         {
             160
+        }
+        INTENT_NETWORK_DIAGNOSIS
+            if text.contains("internet not working")
+                || text.contains("is dns working")
+                || text.contains("diagnose my network") =>
+        {
+            170
+        }
+        INTENT_LIST_SOCKETS
+            if text.contains("list sockets")
+                || text.contains("current connections")
+                || text.contains("my mac talking to") =>
+        {
+            165
         }
         _ => 0,
     }
@@ -457,6 +473,8 @@ fn understand_single(input: &str, data: &DamonData) -> Interpretation {
         INTENT_NETWORK_INTERFACES,
         INTENT_DEFAULT_GATEWAY,
         INTENT_NETWORK_NEIGHBORS,
+        INTENT_NETWORK_DIAGNOSIS,
+        INTENT_LIST_SOCKETS,
     ] {
         let evidence = lexical_evidence(&text, intent);
         let prior = learned
@@ -467,7 +485,11 @@ fn understand_single(input: &str, data: &DamonData) -> Interpretation {
         if evidence > 0 {
             let target = if matches!(
                 intent,
-                INTENT_NETWORK_INTERFACES | INTENT_DEFAULT_GATEWAY | INTENT_NETWORK_NEIGHBORS
+                INTENT_NETWORK_INTERFACES
+                    | INTENT_DEFAULT_GATEWAY
+                    | INTENT_NETWORK_NEIGHBORS
+                    | INTENT_NETWORK_DIAGNOSIS
+                    | INTENT_LIST_SOCKETS
             ) {
                 data.resolve("local host").filter(|id| {
                     data.entity(*id)

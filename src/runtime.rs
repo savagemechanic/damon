@@ -30,10 +30,16 @@ impl Damon {
     }
 
     pub fn handle(&mut self, input: &str) -> String {
+        if let Some(response) = conversational_response(input) {
+            return response;
+        }
         if let Some(result) = crate::world_commands::handle(input, &mut self.data) {
             return result;
         }
         if let Some(result) = self.maintain_memory(input) {
+            return result;
+        }
+        if let Some(result) = self.handle_native_semantic(input) {
             return result;
         }
         let feature = language::feature_hash(input);
@@ -72,9 +78,28 @@ impl Damon {
         if let Err(e) = crate::semantics::validate_request(input, &meaning, &self.data) {
             return format!("I need a clearer request: {e}");
         }
-        let mut plan = match crate::reason::plan(&meaning, &self.data) {
-            Ok(plan) => plan,
-            Err(e) => return e,
+        let procedure_feature = if language::normalize(input).contains("same thing") {
+            self.data.world.context.previous_feature.unwrap_or(feature)
+        } else {
+            feature
+        };
+        let learned_plan = match meaning.target {
+            Some(target) => match self
+                .data
+                .procedures
+                .plan(procedure_feature, target, &self.data)
+            {
+                Ok(plan) => plan,
+                Err(error) => return format!("Stored procedure is invalid: {error}"),
+            },
+            None => None,
+        };
+        let mut plan = match learned_plan {
+            Some(plan) => plan,
+            None => match crate::reason::plan(&meaning, &self.data) {
+                Ok(plan) => plan,
+                Err(e) => return e,
+            },
         };
         // Check the entire plan before any tool can produce side effects.
         for action in &mut plan.actions {
@@ -130,6 +155,13 @@ impl Damon {
             messages.push(structured.render_english());
         }
         let all_succeeded = outcomes.iter().all(|value| *value);
+        if all_succeeded {
+            if let Err(error) = self.data.procedures.remember_verified(feature, &plan) {
+                strategy_errors.push(error.to_string());
+            }
+        } else {
+            self.data.procedures.observe(procedure_feature, false);
+        }
         if let Some((provider, latency_ms)) = teacher {
             let strategy = match provider {
                 crate::model::ProviderKind::Ollama => crate::strategy::LOCAL_MODEL,
@@ -222,6 +254,55 @@ impl Damon {
         None
     }
 
+    fn handle_native_semantic(&mut self, input: &str) -> Option<String> {
+        use crate::semantic_ir::SemanticProducer;
+        let request = crate::semantic_ir::request(input, &self.data);
+        let resolution = language::DeterministicProducer { data: &self.data }.resolve(&request);
+        if resolution.status != crate::semantic_ir::ResolutionStatus::Resolved {
+            return None;
+        }
+        let candidate = resolution.candidates.first()?;
+        let mut plan = match crate::semantic_ir::native_plan(&candidate.ir, &request, &self.data) {
+            Ok(Some(plan)) => plan,
+            Ok(None) => return None,
+            Err(error) => return Some(format!("I need a clearer request: {error}")),
+        };
+        let action = &mut plan.actions[0];
+        if let Err(error) = tools::prepare(action, &mut self.data) {
+            return Some(format!("Deterministic discovery failed: {error}"));
+        }
+        if let Err(error) = self.policy.check(action) {
+            return Some(format!("Policy blocked the plan: {error}"));
+        }
+        let started = Instant::now();
+        let result = tools::execute(action, &self.policy);
+        let rendered = crate::result_ir::ResultIr::from_tool(action, &result).render_english();
+        if let Some(implementation) = self.data.capabilities.resolve_index(action.capability) {
+            let _ = self
+                .data
+                .capabilities
+                .observe(implementation, result.success);
+        }
+        let _ = self.data.strategies.observe(
+            language::feature_hash(input),
+            crate::strategy::for_tool(action.tool),
+            crate::strategy::Outcome {
+                success: result.success,
+                latency_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                cost_units: 0,
+                used_model: false,
+                confidence: crate::semantic_ir::computed_confidence(&resolution, 0),
+                risk: action_risk(action.effects),
+            },
+        );
+        Some(match self.data.save() {
+            Ok(()) => rendered,
+            Err(error) => format!(
+                "{rendered}\nI could not persist learning: {error}. Reopen Damon before continuing."
+            ),
+        })
+    }
+
     fn ask_teacher(
         &self,
         input: &str,
@@ -271,6 +352,25 @@ impl Damon {
             started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
         ))
     }
+}
+
+fn conversational_response(input: &str) -> Option<String> {
+    let text = crate::language::normalize(input);
+    if matches!(text.as_str(), "hi" | "hello" | "hey" | "hello damon") {
+        return Some(
+            "Hey. What would you like me to inspect, test, copy, find, or diagnose?".into(),
+        );
+    }
+    if matches!(
+        text.as_str(),
+        "help" | "what can you do" | "what can you do?" | "show me what you can do"
+    ) {
+        return Some(
+            "I can work with registered code projects, inspect Git status and diffs, list and find files, run discovered tests, copy a project file, inspect interfaces/routes/neighbors/sockets, diagnose connectivity, and manage my local memory. Try “remember project CPython at \"/path/to/cpython\"”, “run the tests in CPython”, “show me what changed”, or “What is my Mac talking to?”."
+                .into(),
+        );
+    }
+    None
 }
 
 fn action_risk(effects: crate::types::Effects) -> u8 {
