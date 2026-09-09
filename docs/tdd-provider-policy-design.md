@@ -51,6 +51,8 @@ Invariants:
 6. Every exit emits exactly one terminal state: success or failure.
 7. Timeouts bound blocked I/O, but transition count proves loop termination.
 8. Provider output is untrusted until structural and semantic validation pass.
+9. Surrounding prose may contain exactly one bounded JSON meaning object; missing,
+   incomplete, ambiguous, or schema-invalid objects fail closed.
 
 Ollama remains available as an explicitly configured fallback, but its default
 model is empty. OpenCode Zen is the first cloud teacher. Damon calls Zen's HTTPS

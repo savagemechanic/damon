@@ -92,6 +92,34 @@ fn strict_json_rejects_schema_concepts_slots_edges_and_missing_arguments() {
 }
 
 #[test]
+fn model_text_extracts_one_bounded_json_meaning_and_rejects_ambiguity() {
+    let fixture = Fixture::new();
+    let data = fixture.data();
+    let request = semantic_ir::request("run the tests in Damon", &data);
+    let json = run_tests_json(0);
+
+    for output in [
+        format!("Here is the meaning:\n{json}\nThis follows the requested schema."),
+        format!("```json\n{json}\n```"),
+    ] {
+        let resolution = semantic_ir::JsonSemanticProducer { output: &output }.resolve(&request);
+        assert_eq!(resolution.status, ResolutionStatus::Resolved, "{output}");
+        assert!(resolution.diagnostic.is_none());
+    }
+
+    for output in [
+        format!("{json}\n{json}"),
+        json[..json.len() - 1].to_string(),
+        "There is no meaning object here.".to_string(),
+        format!("{}{}", "x".repeat(32 * 1024), json),
+    ] {
+        let resolution = semantic_ir::JsonSemanticProducer { output: &output }.resolve(&request);
+        assert_eq!(resolution.status, ResolutionStatus::Invalid, "{output}");
+        assert!(resolution.diagnostic.is_some());
+    }
+}
+
+#[test]
 fn canonical_bytes_are_stable_hashable_and_round_trip() {
     let fixture = Fixture::new();
     let data = fixture.data();

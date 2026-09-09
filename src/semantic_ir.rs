@@ -120,14 +120,71 @@ pub struct JsonSemanticProducer<'a> {
 
 impl SemanticProducer for JsonSemanticProducer<'_> {
     fn resolve(&self, request: &SemanticRequest) -> SemanticResolution {
-        parse_json(self.output, request).unwrap_or_else(|diagnostic| SemanticResolution {
-            status: ResolutionStatus::Invalid,
-            candidates: Vec::new(),
-            unresolved_spans: Vec::new(),
-            producer: ProducerKind::Model,
-            diagnostic: Some(diagnostic),
-        })
+        extract_json_object(self.output)
+            .and_then(|json| parse_json(json, request))
+            .unwrap_or_else(|diagnostic| SemanticResolution {
+                status: ResolutionStatus::Invalid,
+                candidates: Vec::new(),
+                unresolved_spans: Vec::new(),
+                producer: ProducerKind::Model,
+                diagnostic: Some(diagnostic),
+            })
     }
+}
+
+fn extract_json_object(text: &str) -> Result<&str, String> {
+    const MAX_BYTES: usize = 32 * 1024;
+    if text.len() > MAX_BYTES {
+        return Err("model meaning exceeds 32 KiB".into());
+    }
+
+    let bytes = text.as_bytes();
+    let mut start = None;
+    let mut end = None;
+    let mut depth = 0_usize;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        if end.is_some() {
+            if byte == b'{' {
+                return Err("model returned more than one JSON object".into());
+            }
+            continue;
+        }
+        if start.is_none() {
+            if byte == b'{' {
+                start = Some(index);
+                depth = 1;
+            }
+            continue;
+        }
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(index + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let start = start.ok_or("model returned no JSON object")?;
+    let end = end.ok_or("model returned an incomplete JSON object")?;
+    Ok(&text[start..end])
 }
 
 pub fn from_meaning(

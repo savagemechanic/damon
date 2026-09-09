@@ -54,7 +54,10 @@ blocked before a model can interpret it. All providers share the checked-in temp
 template carries the strict JSON shape for providers without schema enforcement;
 the compact template is intended for constrained local decoding. Unknown fields,
 invented concepts, invented slots, invalid spans, and unsupported meanings fail
-closed. A rejected meaning gets at most one fresh repair attempt. A provider
+closed. Damon can extract one bounded JSON object from surrounding provider prose
+or a Markdown fence, then applies the same strict structural and semantic checks.
+Missing, incomplete, or multiple objects fail closed. A rejected meaning gets at
+most one fresh repair attempt. A provider
 adapter cannot retry internally, so one meaning request makes at most two model
 calls. There is no unbounded repair loop.
 
