@@ -130,6 +130,14 @@ pub struct Store {
     journal_len: usize,
     poisoned: bool,
 }
+impl Drop for Store {
+    fn drop(&mut self) {
+        // Release explicitly: another thread can fork while this descriptor is
+        // open. Its inherited duplicate must not extend our lock's lifetime
+        // between fork and exec after the owning Store has been dropped.
+        let _ = self._lock.unlock();
+    }
+}
 impl Store {
     pub fn open(
         path: &Path,
@@ -324,6 +332,19 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn inherited_descriptor_does_not_extend_store_lock_lifetime() {
+        let dir = std::env::temp_dir().join(format!("damon-lock-drop-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("brain");
+        let (store, _) = Store::open(&path, |_| Ok(())).unwrap();
+        let inherited = store._lock.try_clone().unwrap();
+        drop(store);
+        let (reopened, _) = Store::open(&path, |_| Ok(())).unwrap();
+        drop(reopened);
+        drop(inherited);
+        fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn crc_matches_standard_check_vector() {
         assert_eq!(checksum(b"123456789"), 0xcbf43926);
