@@ -1,0 +1,63 @@
+# Damon Tao — Rust kernel
+
+`tao` is the experimental Rust rewrite of Damon around a deliberately small idea:
+
+> Natural language in → compact data → fundamental algorithms → machine actions → natural language out → learning.
+
+The human interface is English. Internally Damon uses typed integer IDs, arrays, hashes, compact meaning graphs, Bayesian/count-based evidence, deterministic tools, and a binary `damon.data` file. The runtime learns successful language mappings into that file so repeated requests can avoid model inference.
+
+## Run
+
+```bash
+cargo run
+```
+
+Damon creates `~/.damon/damon.data` on first start. Override it with `DAMON_DATA=/path/to/damon.data`.
+
+Example requests:
+
+```text
+show me what changed in Damon
+run the tests in Damon
+show git status
+list files
+```
+
+## Model routing: free first
+
+The language engine always tries deterministic/local learned interpretation first. A model is only used when the request is unknown.
+
+Routing order:
+
+1. local deterministic/learned interpretation — zero inference cost
+2. local Ollama — default model `qwen3:8b`
+3. optional external command from `DAMON_MODEL_COMMAND`
+4. optional cloud command from `DAMON_CLOUD_COMMAND`, but only when `DAMON_ALLOW_CLOUD=1`
+
+Examples:
+
+```bash
+DAMON_OLLAMA_MODEL=qwen3:8b cargo run
+DAMON_MODEL_COMMAND='my-free-model-wrapper' cargo run
+DAMON_ALLOW_CLOUD=1 DAMON_CLOUD_COMMAND='my-cloud-wrapper' cargo run
+```
+
+The external command receives the prompt on stdin and must print the response on stdout. This keeps Damon provider-independent and allows free/local providers, OpenCode-style routers, or future APIs to be plugged in without adding provider SDKs to the kernel.
+
+Cloud use is intentionally disabled by default.
+
+## Current kernel
+
+The first Tao kernel implements:
+
+- binary `damon.data` persistence with explicit little-endian fields
+- compact entity IDs and name hash index
+- language normalization and cheap deterministic intent scoring
+- learned phrase→intent counts persisted from verified outcomes
+- local-first model router with Ollama and generic command fallbacks
+- deterministic policy effects
+- Git status/diff, test discovery, and file-listing tools
+- natural-language interactive loop
+- unit tests for binary persistence and language resolution
+
+It intentionally does **not** introduce a database, agent framework, cloud SDK, vector database, or neural runtime.
