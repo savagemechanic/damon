@@ -115,11 +115,9 @@ fn parse_linux_endpoint(value: &str, ipv6: bool) -> io::Result<Endpoint> {
             ));
         }
         let mut bytes = [0_u8; 16];
-        for (chunk, output) in address
-            .as_bytes()
-            .chunks_exact(8)
-            .zip(bytes.chunks_exact_mut(4))
-        {
+        let (chunks, _) = address.as_bytes().as_chunks::<8>();
+        let (outputs, _) = bytes.as_chunks_mut::<4>();
+        for (chunk, output) in chunks.iter().zip(outputs.iter_mut()) {
             let text = std::str::from_utf8(chunk)
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid IPv6 hex"))?;
             output.copy_from_slice(
