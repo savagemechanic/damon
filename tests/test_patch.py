@@ -1,10 +1,13 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from damon.tools.patch import make_patch_tool
 
 
-def test_apply_patch_checks_and_applies(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_apply_patch_checks_and_applies(tmp_path: Path):
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     path = tmp_path / "a.txt"
     path.write_text("old\n")
@@ -15,6 +18,6 @@ def test_apply_patch_checks_and_applies(tmp_path: Path):
 -old
 +new
 """
-    result = make_patch_tool(tmp_path)(patch)
+    result = await make_patch_tool(tmp_path)(patch)
     assert result["applied"] is True
     assert path.read_text() == "new\n"
