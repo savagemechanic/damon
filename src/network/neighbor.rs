@@ -183,11 +183,10 @@ fn now_ms() -> u64 {
         .min(u128::from(u64::MAX)) as u64
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "linux")]
     #[test]
     fn parses_passive_arp_rows_and_keeps_incomplete_observations() {
         let text = "IP address HW type Flags HW address Mask Device\n\
