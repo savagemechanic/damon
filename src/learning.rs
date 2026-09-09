@@ -1,12 +1,7 @@
 use crate::data::DamonData;
 use crate::types::{IntentId, MeaningGraph};
 
-pub fn observe_verified(
-    data: &mut DamonData,
-    feature: u64,
-    meaning: &MeaningGraph,
-    success: bool,
-) {
+pub fn observe_verified(data: &mut DamonData, feature: u64, meaning: &MeaningGraph, success: bool) {
     let reward = if success { 1 } else { -1 };
     data.observe_language(feature, meaning.intent, reward, meaning.confidence);
 }

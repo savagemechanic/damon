@@ -19,7 +19,11 @@ pub enum Interpretation {
 }
 
 pub fn normalize(input: &str) -> String {
-    input.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
+    input
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub fn feature_hash(input: &str) -> u64 {
@@ -31,23 +35,43 @@ pub fn feature_hash(input: &str) -> u64 {
 fn lexical_evidence(text: &str, intent: IntentId) -> i32 {
     match intent {
         INTENT_RUN_TESTS => {
-            if text.contains("test") { 96 }
-            else if text.contains("check the code") || text.starts_with("check ") { 36 }
-            else { 0 }
+            if text.contains("test") {
+                96
+            } else if text.contains("check the code") || text.starts_with("check ") {
+                36
+            } else {
+                0
+            }
         }
         INTENT_GIT_DIFF => {
-            if text.contains("diff") || text.contains("what changed") || text.contains("what did i change") || text.contains("what have i changed") || text.contains("touched") { 104 }
-            else if text.contains("change") || text.contains("modified") { 58 }
-            else { 0 }
+            if text.contains("diff")
+                || text.contains("what changed")
+                || text.contains("what did i change")
+                || text.contains("what have i changed")
+                || text.contains("touched")
+            {
+                104
+            } else if text.contains("change") || text.contains("modified") {
+                58
+            } else {
+                0
+            }
         }
         INTENT_GIT_STATUS => {
-            if text.contains("git status") || text == "status" || text.contains("repo status") { 104 }
-            else if text.starts_with("check ") { 28 }
-            else { 0 }
+            if text.contains("git status") || text == "status" || text.contains("repo status") {
+                104
+            } else if text.starts_with("check ") {
+                28
+            } else {
+                0
+            }
         }
-        INTENT_LIST_FILES => {
-            if text.contains("list files") || text.contains("show files") || text.contains("what files") { 96 }
-            else { 0 }
+        INTENT_LIST_FILES
+            if text.contains("list files")
+                || text.contains("show files")
+                || text.contains("what files") =>
+        {
+            96
         }
         _ => 0,
     }
@@ -68,7 +92,12 @@ pub fn understand(input: &str, data: &DamonData) -> Interpretation {
     let learned = data.language_candidates(feature);
     let mut candidates = Vec::new();
 
-    for intent in [INTENT_GIT_STATUS, INTENT_GIT_DIFF, INTENT_RUN_TESTS, INTENT_LIST_FILES] {
+    for intent in [
+        INTENT_GIT_STATUS,
+        INTENT_GIT_DIFF,
+        INTENT_RUN_TESTS,
+        INTENT_LIST_FILES,
+    ] {
         let evidence = lexical_evidence(&text, intent);
         let prior = learned
             .iter()
@@ -86,7 +115,7 @@ pub fn understand(input: &str, data: &DamonData) -> Interpretation {
     }
 
     let best = &beam[0];
-    if best.evidence < 40 && best.prior <= 1 {
+    if best.evidence < 40 && best.prior <= 1 && beam.len() == 1 {
         return Interpretation::Unknown { feature };
     }
 
@@ -125,7 +154,9 @@ mod tests {
         let p = std::env::temp_dir().join(format!("damon-lang-{}.data", std::process::id()));
         let _ = std::fs::remove_file(&p);
         let d = DamonData::open(&p).unwrap();
-        let Interpretation::Resolved(m) = understand("show me what changed in damon", &d) else { panic!() };
+        let Interpretation::Resolved(m) = understand("show me what changed in damon", &d) else {
+            panic!()
+        };
         assert_eq!(m.intent, INTENT_GIT_DIFF);
         assert!(m.target.is_some());
         let _ = std::fs::remove_file(p);
@@ -136,7 +167,10 @@ mod tests {
         let p = std::env::temp_dir().join(format!("damon-amb-{}.data", std::process::id()));
         let _ = std::fs::remove_file(&p);
         let d = DamonData::open(&p).unwrap();
-        assert!(matches!(understand("check damon", &d), Interpretation::Ambiguous(_)));
+        assert!(matches!(
+            understand("check damon", &d),
+            Interpretation::Ambiguous(_)
+        ));
         let _ = std::fs::remove_file(p);
     }
 }

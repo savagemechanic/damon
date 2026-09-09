@@ -9,3 +9,9 @@ build/
 .damon/
 *.db
 .DS_Store
+
+# Rust build products and live personal brain state
+/target/
+*.data
+*.data.*
+!tests/fixtures/*.data

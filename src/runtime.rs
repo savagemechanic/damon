@@ -34,7 +34,9 @@ impl Damon {
             Interpretation::Resolved(m) => m,
             Interpretation::Ambiguous(beam) => {
                 if let Some(best) = beam.first() {
-                    if best.score() - beam.get(1).map(|c| c.score()).unwrap_or(best.score() - 64) >= 24 {
+                    if best.score() - beam.get(1).map(|c| c.score()).unwrap_or(best.score() - 64)
+                        >= 24
+                    {
                         candidate_to_meaning(best, 170)
                     } else {
                         match self.ask_teacher(input) {

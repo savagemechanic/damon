@@ -18,12 +18,20 @@ impl Effects {
     pub const CREDENTIAL: Self = Self(1 << 4);
     pub const DESTRUCTIVE: Self = Self(1 << 5);
     pub const PRIVILEGED: Self = Self(1 << 6);
-    pub fn union(self, other: Self) -> Self { Self(self.0 | other.0) }
-    pub fn contains(self, other: Self) -> bool { (self.0 & other.0) == other.0 }
+    pub fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+    pub fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MeaningEdge { pub source: u32, pub relation: u16, pub target: u32 }
+pub struct MeaningEdge {
+    pub source: u32,
+    pub relation: u16,
+    pub target: u32,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MeaningGraph {
     pub intent: IntentId,
