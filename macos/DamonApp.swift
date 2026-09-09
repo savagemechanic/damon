@@ -11,7 +11,7 @@ private struct Message: Identifiable {
 }
 
 @MainActor
-private final class DamonSession: ObservableObject {
+private final class DamonSession: ObservableObject, @unchecked Sendable {
     @Published var messages = [
         Message(fromDamon: true, text: "Damon is ready. What would you like to do?")
     ]
@@ -58,25 +58,24 @@ private final class DamonSession: ObservableObject {
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
         process.standardError = errorPipe
-        process.terminationHandler = { [weak self] task in
-            Task { @MainActor in
-                guard let self else { return }
+        process.terminationHandler = { [self] task in
+            Task { @MainActor [self] in
                 self.available = false
                 if task.terminationStatus != 0 {
                     self.messages.append(Message(fromDamon: true, text: "The local runtime stopped unexpectedly."))
                 }
             }
         }
-        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        outputPipe.fileHandleForReading.readabilityHandler = { [self] handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
-            Task { @MainActor in self?.consume(data) }
+            Task { @MainActor [self] in consume(data) }
         }
-        errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        errorPipe.fileHandleForReading.readabilityHandler = { [self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            Task { @MainActor in
-                self?.messages.append(Message(fromDamon: true, text: text.trimmingCharacters(in: .whitespacesAndNewlines)))
+            Task { @MainActor [self] in
+                messages.append(Message(fromDamon: true, text: text.trimmingCharacters(in: .whitespacesAndNewlines)))
             }
         }
         do {
@@ -116,7 +115,7 @@ private struct MessageBubble: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(message.fromDamon ? Color(nsColor: .controlBackgroundColor) : Color.accentColor)
-                .foregroundStyle(message.fromDamon ? .primary : .white)
+                .foregroundColor(message.fromDamon ? Color.primary : Color.white)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             if message.fromDamon { Spacer(minLength: 72) }
         }
