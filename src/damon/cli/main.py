@@ -9,6 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from damon.core.agent import Agent
+from damon.core.coding import CodingAgent
 from damon.models.ollama import OllamaModel
 from damon.models.router import ModelCandidate, ModelRouter, ModelTier, RouterPolicy
 from damon.models.providers import opencode_zen, openrouter
@@ -17,28 +18,52 @@ from damon.runtime.bootstrap import default_registry
 from damon.runtime.executor import ToolExecutor
 
 
+def _add_model_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--model", default=os.getenv("DAMON_MODEL", "qwen3:8b"), help="primary Ollama model")
+    parser.add_argument(
+        "--models",
+        default=os.getenv("DAMON_MODELS"),
+        help="comma-separated Ollama escalation chain, cheapest first",
+    )
+    parser.add_argument("--local-only", action="store_true", help="forbid non-local model routes")
+    parser.add_argument("--allow-cloud", action="store_true", help="allow explicitly configured cloud routes")
+    parser.add_argument("--max-spend-usd", type=float, default=float(os.getenv("DAMON_MAX_SPEND_USD", "0")))
+    parser.add_argument("--zen-free-model", default=os.getenv("DAMON_ZEN_FREE_MODEL"), help="OpenCode Zen free fallback")
+    parser.add_argument("--openrouter-model", default=os.getenv("DAMON_OPENROUTER_MODEL"), help="paid OpenRouter fallback")
+    parser.add_argument(
+        "--openrouter-input-rate",
+        type=float,
+        default=float(os.getenv("DAMON_OPENROUTER_INPUT_RATE", "0")),
+        help="USD per million input tokens",
+    )
+    parser.add_argument(
+        "--openrouter-output-rate",
+        type=float,
+        default=float(os.getenv("DAMON_OPENROUTER_OUTPUT_RATE", "0")),
+        help="USD per million output tokens",
+    )
+    parser.add_argument(
+        "--openrouter-request-ceiling",
+        type=float,
+        default=float(os.getenv("DAMON_OPENROUTER_REQUEST_CEILING", "0")),
+        help="conservative maximum USD reserved for each paid request",
+    )
+    parser.add_argument("--ollama-url", default=os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434"))
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="damon", description="Local-first agentic runtime")
     parser.add_argument("--root", type=Path, default=Path.cwd(), help="workspace root")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    ask = sub.add_parser("ask", help="run the coding agent")
+    ask = sub.add_parser("ask", help="run the agent loop")
     ask.add_argument("request")
-    ask.add_argument("--model", default=os.getenv("DAMON_MODEL", "qwen3:8b"), help="primary Ollama model")
-    ask.add_argument(
-        "--models",
-        default=os.getenv("DAMON_MODELS"),
-        help="comma-separated Ollama escalation chain, cheapest first",
-    )
-    ask.add_argument("--local-only", action="store_true", help="forbid non-local model routes")
-    ask.add_argument("--allow-cloud", action="store_true", help="allow explicitly configured cloud routes")
-    ask.add_argument("--max-spend-usd", type=float, default=float(os.getenv("DAMON_MAX_SPEND_USD", "0")))
-    ask.add_argument("--zen-free-model", default=os.getenv("DAMON_ZEN_FREE_MODEL"), help="OpenCode Zen free fallback")
-    ask.add_argument("--openrouter-model", default=os.getenv("DAMON_OPENROUTER_MODEL"), help="paid OpenRouter fallback")
-    ask.add_argument("--openrouter-input-rate", type=float, default=float(os.getenv("DAMON_OPENROUTER_INPUT_RATE", "0")), help="USD per million input tokens")
-    ask.add_argument("--openrouter-output-rate", type=float, default=float(os.getenv("DAMON_OPENROUTER_OUTPUT_RATE", "0")), help="USD per million output tokens")
-    ask.add_argument("--openrouter-request-ceiling", type=float, default=float(os.getenv("DAMON_OPENROUTER_REQUEST_CEILING", "0")), help="conservative maximum USD reserved for each paid request")
-    ask.add_argument("--ollama-url", default=os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434"))
+    _add_model_args(ask)
+
+    code = sub.add_parser("code", help="run bounded coding task orchestration")
+    code.add_argument("request")
+    _add_model_args(code)
+    code.add_argument("--max-attempts", type=int, default=3, help="maximum coding/repair attempts")
 
     sub.add_parser("tools", help="list available native tools")
     sub.add_parser("doctor", help="check local prerequisites")
@@ -110,6 +135,20 @@ async def _ask(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _code(args: argparse.Namespace) -> int:
+    root = args.root.resolve()
+    registry = default_registry(root)
+    agent = CodingAgent(
+        _router(args),
+        registry,
+        ToolExecutor(registry, Policy()),
+        max_attempts=args.max_attempts,
+    )
+    outcome = await agent.run(args.request)
+    print(json.dumps(outcome.as_dict(), indent=2, default=str))
+    return 0 if outcome.verification_passed is not False else 1
+
+
 def main() -> int:
     args = _parser().parse_args()
     if args.command == "doctor":
@@ -122,6 +161,8 @@ def main() -> int:
         return 0
     if args.command == "ask":
         return asyncio.run(_ask(args))
+    if args.command == "code":
+        return asyncio.run(_code(args))
     return 2
 
 
