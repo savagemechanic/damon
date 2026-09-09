@@ -9,6 +9,7 @@ pub mod packet;
 pub mod route;
 pub mod socket;
 pub mod topology;
+pub mod wifi;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct InterfaceId(pub u32);

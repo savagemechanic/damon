@@ -28,6 +28,9 @@ cryptography.
   route choice with metric tie breaking;
 - direct Unix `getifaddrs` interface/address discovery, with Linux sysfs MTU and
   counters and explicit unknown values where the OS does not expose data yet;
+- privacy-respecting macOS Wi-Fi link discovery through bounded structured
+  system output, with byte-bounded SSIDs, BSSID, channel, band, signal, noise,
+  link rate, security, interface, and connection state;
 - structured Linux `/proc/net/route` and bounded macOS routing-table discovery,
   default-gateway selection, and native English questions for interfaces/routes;
 - passive Linux ARP and bounded macOS ARP/IPv6 neighbor-table discovery with
@@ -49,9 +52,10 @@ lengths, unsupported ARP layouts, and excess parsing depth fail explicitly.
 ## Safety and lifetime rules
 
 Passive, system-known state comes before active probing. `not observed` never
-means `does not exist`. Active discovery and packet capture will be separate,
-policy-visible effects. Capture must be explicitly enabled, filtered, bounded by
-time/output, and never persist full payloads by default.
+means `does not exist`. Privacy-redacted Wi-Fi fields remain unknown; Damon does
+not bypass macOS permissions. Active discovery and packet capture will be
+separate, policy-visible effects. Capture must be explicitly enabled, filtered,
+bounded by time/output, and never persist full payloads by default.
 
 Socket operations require a nonzero timeout of at most 120 seconds and cap each
 send/receive at 1 MiB. These are library primitives, not authorization: exposed
@@ -74,8 +78,7 @@ the encoder rejects accidental persistence of raw observations.
 
 ## Remaining integration order
 
-1. macOS Wi-Fi metadata within OS privacy boundaries and richer IPv6 neighbor
-   state where directly available.
+1. Richer IPv6 neighbor state where directly available.
 2. Socket/process inventory and owner resolution.
 3. Explicit bounded packet observation behind policy.
 4. DNS resolution/protocol parsing, DHCP observations, and staged diagnostics.

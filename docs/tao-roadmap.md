@@ -37,6 +37,8 @@ Delivered milestones:
 - Provenance-aware topology derivation across machines, interfaces, addresses,
   subnets, hosts, MACs, routers, and routes, with compact selective persistence
   that rejects raw volatile observations.
+- Typed macOS Wi-Fi link state from bounded structured system inspection, with
+  explicit unknowns for privacy-redacted fields and no permission bypass.
 
 Remaining implementation priorities:
 
