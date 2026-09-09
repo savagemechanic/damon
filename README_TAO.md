@@ -50,7 +50,7 @@ Cloud use is intentionally disabled by default.
 
 The first Tao kernel implements:
 
-- binary `damon.data` persistence with explicit little-endian fields
+- versioned/checksummed `damon.data`, append-only image journal, crash recovery, compaction, and portable backups
 - compact entity IDs and name hash index
 - language normalization and cheap deterministic intent scoring
 - learned phrase→intent counts persisted from verified outcomes
@@ -61,3 +61,10 @@ The first Tao kernel implements:
 - unit tests for binary persistence and language resolution
 
 It intentionally does **not** introduce a database, agent framework, cloud SDK, vector database, or neural runtime.
+
+## Personal state and fixtures
+
+Never commit live `damon.data`, journals, backups, or learned personal state.
+Only synthetic format fixtures under `tests/fixtures/` belong in Git.
+See [the data format and recovery guide](docs/data-format.md) for durability
+guarantees, limits, migration, and natural-language backup/restore operations.

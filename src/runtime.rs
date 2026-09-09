@@ -29,6 +29,9 @@ impl Damon {
     }
 
     pub fn handle(&mut self, input: &str) -> String {
+        if let Some(result) = self.maintain_memory(input) {
+            return result;
+        }
         let feature = language::feature_hash(input);
         let meaning = match language::understand(input, &self.data) {
             Interpretation::Resolved(m) => m,
@@ -80,8 +83,60 @@ impl Damon {
 
         let result = tools::execute(&action);
         learning::observe_verified(&mut self.data, feature, &meaning, result.success);
-        let _ = self.data.save();
-        render_result(result)
+        let rendered = render_result(result);
+        match self.data.save() {
+            Ok(()) => rendered,
+            Err(e) => format!(
+                "{rendered}\nI could not persist learning: {e}. Reopen Damon before continuing."
+            ),
+        }
+    }
+
+    fn maintain_memory(&mut self, input: &str) -> Option<String> {
+        let input = input.trim();
+        if input.eq_ignore_ascii_case("compact my memory") {
+            return Some(match self.data.compact() {
+                Ok(()) => format!("Memory compacted at generation {}.", self.data.generation()),
+                Err(e) => format!("Memory compaction failed: {e}"),
+            });
+        }
+        if input.eq_ignore_ascii_case("show memory status") {
+            return Some(format!(
+                "Memory generation {}: {} entities, {} learned phrases, {} retained experiences.",
+                self.data.generation(),
+                self.data.entities.len(),
+                self.data.language_counts.len(),
+                self.data.experiences.len()
+            ));
+        }
+        for (prefix, restore) in [
+            ("back up my memory to ", false),
+            ("export my memory to ", false),
+            ("restore my memory from ", true),
+            ("import my memory from ", true),
+        ] {
+            if input.to_ascii_lowercase().starts_with(prefix) {
+                let path = input[prefix.len()..].trim();
+                let Some(path) = path
+                    .strip_prefix('"')
+                    .and_then(|p| p.strip_suffix('"'))
+                    .filter(|p| !p.is_empty() && !p.contains('"'))
+                else {
+                    return Some("Put the complete backup path in double quotes.".into());
+                };
+                let result = if restore {
+                    self.data.restore(path)
+                } else {
+                    self.data.export(path)
+                };
+                return Some(match result {
+                    Ok(()) if restore => "Memory restored from a verified backup.".into(),
+                    Ok(()) => "Memory backup saved.".into(),
+                    Err(e) => format!("Memory operation failed: {e}"),
+                });
+            }
+        }
+        None
     }
 
     fn ask_teacher(&self, input: &str) -> Result<MeaningGraph, String> {

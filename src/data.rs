@@ -1,8 +1,9 @@
+use crate::storage::{self, Store};
 use crate::types::{EntityId, IntentId};
 use std::collections::HashMap;
-use std::fs::{self, File};
-use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::io::{self, Write};
+use std::path::Path;
 
 const MAGIC: &[u8; 8] = b"DAMON\0\x01\0";
 
@@ -24,7 +25,7 @@ pub struct Experience {
 }
 #[derive(Debug)]
 pub struct DamonData {
-    path: PathBuf,
+    store: Option<Store>,
     pub entities: Vec<Entity>,
     pub names: HashMap<String, EntityId>,
     pub language_counts: HashMap<u64, Vec<(IntentId, u32)>>,
@@ -33,25 +34,33 @@ pub struct DamonData {
 
 impl DamonData {
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
-        let path = path.as_ref().to_path_buf();
-        if !path.exists() {
-            let mut data = Self::empty(path);
+        let (store, payload) = Store::open(path.as_ref(), |bytes| Self::decode(bytes).map(|_| ()))?;
+        let fresh = payload.is_none();
+        let mut data = match payload {
+            Some(bytes) => Self::decode(&bytes)?,
+            None => Self::empty(),
+        };
+        data.store = Some(store);
+        if fresh {
             data.seed();
             data.save()?;
-            return Ok(data);
         }
-        let mut bytes = Vec::new();
-        File::open(&path)?.read_to_end(&mut bytes)?;
-        Self::decode(path, &bytes)
+        Ok(data)
     }
-    fn empty(path: PathBuf) -> Self {
+    fn empty() -> Self {
         Self {
-            path,
+            store: None,
             entities: Vec::new(),
             names: HashMap::new(),
             language_counts: HashMap::new(),
             experiences: Vec::new(),
         }
+    }
+    pub fn generation(&self) -> u64 {
+        self.store.as_ref().map_or(0, |s| s.generation)
+    }
+    pub fn recovery_warnings(&self) -> &[String] {
+        self.store.as_ref().map_or(&[], |s| s.warnings.as_slice())
     }
     fn seed(&mut self) {
         self.add_entity(1, "damon", ".");
@@ -85,10 +94,23 @@ impl DamonData {
         reward: i16,
         confidence: u8,
     ) {
+        if !self.language_counts.contains_key(&feature) && self.language_counts.len() >= 8192 {
+            // Retain the most useful phrases; hashes break ties deterministically.
+            if let Some(key) = self
+                .language_counts
+                .iter()
+                .min_by_key(|(key, row)| {
+                    (row.iter().map(|(_, c)| u64::from(*c)).sum::<u64>(), **key)
+                })
+                .map(|(key, _)| *key)
+            {
+                self.language_counts.remove(&key);
+            }
+        }
         let row = self.language_counts.entry(feature).or_default();
         if reward > 0 {
             if let Some((_, count)) = row.iter_mut().find(|(id, _)| *id == intent) {
-                *count += 1;
+                *count = count.saturating_add(1);
             } else {
                 row.push((intent, 1));
             }
@@ -109,12 +131,48 @@ impl DamonData {
             .map(Vec::as_slice)
             .unwrap_or(&[])
     }
-    pub fn save(&self) -> io::Result<()> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
+    pub fn save(&mut self) -> io::Result<()> {
+        let bytes = self.encode()?;
+        self.store
+            .as_mut()
+            .ok_or_else(|| storage::invalid("detached brain"))?
+            .commit(&bytes)
+    }
+    pub fn compact(&mut self) -> io::Result<()> {
+        let bytes = self.encode()?;
+        self.store
+            .as_mut()
+            .ok_or_else(|| storage::invalid("detached brain"))?
+            .compact(&bytes)
+    }
+    pub fn export(&self, path: impl AsRef<Path>) -> io::Result<()> {
+        self.store
+            .as_ref()
+            .ok_or_else(|| storage::invalid("detached brain"))?
+            .export(path.as_ref(), &self.encode()?)
+    }
+    pub fn restore(&mut self, path: impl AsRef<Path>) -> io::Result<()> {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        fs::File::open(path)?
+            .take(storage::MAX_IMAGE as u64 + 33)
+            .read_to_end(&mut bytes)?;
+        let (_, payload, n) = storage::unframe(&bytes)?;
+        if n != bytes.len() {
+            return Err(storage::invalid("backup has trailing bytes"));
         }
-        let tmp = self.path.with_extension("data.tmp");
-        let mut f = File::create(&tmp)?;
+        let mut replacement = Self::decode(payload)?;
+        // Commit before replacing in-memory state; generations never roll back.
+        self.store
+            .as_mut()
+            .ok_or_else(|| storage::invalid("detached brain"))?
+            .compact(payload)?;
+        replacement.store = self.store.take();
+        *self = replacement;
+        Ok(())
+    }
+    fn encode(&self) -> io::Result<Vec<u8>> {
+        let mut f = Vec::new();
         f.write_all(MAGIC)?;
         write_u32(&mut f, self.entities.len() as u32)?;
         for e in &self.entities {
@@ -142,11 +200,12 @@ impl DamonData {
             write_i16(&mut f, x.reward)?;
             f.write_all(&[x.confidence])?;
         }
-        f.sync_all()?;
-        fs::rename(tmp, &self.path)?;
-        Ok(())
+        if f.len() > storage::MAX_IMAGE {
+            return Err(storage::invalid("brain image exceeds size limit"));
+        }
+        Ok(f)
     }
-    fn decode(path: PathBuf, bytes: &[u8]) -> io::Result<Self> {
+    fn decode(bytes: &[u8]) -> io::Result<Self> {
         let mut r = Reader { bytes, pos: 0 };
         if r.take(8)? != MAGIC {
             return Err(io::Error::new(
@@ -154,7 +213,7 @@ impl DamonData {
                 "invalid damon.data header",
             ));
         }
-        let mut data = Self::empty(path);
+        let mut data = Self::empty();
         let n = r.u32()? as usize;
         for _ in 0..n {
             let kind = r.u16()?;
@@ -177,7 +236,7 @@ impl DamonData {
         for _ in 0..rows {
             let feature = r.u64()?;
             let len = r.u32()? as usize;
-            let mut counts = Vec::with_capacity(len);
+            let mut counts = Vec::new();
             for _ in 0..len {
                 counts.push((IntentId(r.u32()?), r.u32()?));
             }
@@ -191,6 +250,12 @@ impl DamonData {
                 reward: r.i16()?,
                 confidence: r.u8()?,
             });
+        }
+        if r.pos != bytes.len() {
+            return Err(storage::invalid("trailing payload bytes"));
+        }
+        if data.names.len() != data.entities.len() {
+            return Err(storage::invalid("duplicate entity names"));
         }
         Ok(data)
     }
@@ -217,7 +282,7 @@ struct Reader<'a> {
 }
 impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> io::Result<&'a [u8]> {
-        if self.pos + n > self.bytes.len() {
+        if n > self.bytes.len() - self.pos {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "truncated damon.data",
@@ -259,6 +324,7 @@ mod tests {
         let id = d.add_entity(1, "cpython", "/tmp/cpython");
         d.observe_language(123, IntentId(7), 1, 240);
         d.save().unwrap();
+        drop(d);
         let d2 = DamonData::open(&p).unwrap();
         assert_eq!(d2.resolve("cpython"), Some(id));
         assert_eq!(d2.language_candidates(123), &[(IntentId(7), 1)]);

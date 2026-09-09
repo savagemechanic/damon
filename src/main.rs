@@ -2,6 +2,9 @@ use damon::Damon;
 use std::io::{self, Write};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut damon = Damon::open_default()?;
+    for warning in damon.data.recovery_warnings() {
+        eprintln!("Memory recovery: {warning}");
+    }
     println!("Damon is ready. Speak naturally. Type 'exit' to stop.");
     let stdin = io::stdin();
     loop {
