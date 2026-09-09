@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from damon.tools.registry import tool
+
+
+IGNORED_DIRS = {
+    ".git", ".venv", "venv", "node_modules", "dist", "build", "target",
+    "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox",
+}
 
 
 def _resolve(root: Path, path: str) -> Path:
@@ -11,6 +18,12 @@ def _resolve(root: Path, path: str) -> Path:
     if candidate != root and root not in candidate.parents:
         raise ValueError(f"path escapes workspace: {path}")
     return candidate
+
+
+def _walk(target: Path):
+    for current, dirs, files in os.walk(target, topdown=True, followlinks=False):
+        dirs[:] = sorted(name for name in dirs if name not in IGNORED_DIRS)
+        yield Path(current), dirs, sorted(files)
 
 
 def make_filesystem_tools(root: Path):
@@ -22,15 +35,17 @@ def make_filesystem_tools(root: Path):
 
     @tool(permission="filesystem.read")
     def list_files(path: str = ".", max_entries: int = 500) -> list[str]:
-        """List files recursively inside a workspace directory."""
+        """List workspace paths recursively while pruning generated dependency/cache trees."""
         target = _resolve(root, path)
-        entries = []
-        for item in sorted(target.rglob("*")):
-            if ".git" in item.parts:
-                continue
-            entries.append(str(item.relative_to(root)))
-            if len(entries) >= max_entries:
-                break
+        if target.is_file():
+            return [str(target.relative_to(root))]
+        entries: list[str] = []
+        for current, dirs, files in _walk(target):
+            for name in [*dirs, *files]:
+                item = current / name
+                entries.append(str(item.relative_to(root)))
+                if len(entries) >= max_entries:
+                    return entries
         return entries
 
     @tool(permission="workspace.write")
