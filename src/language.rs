@@ -91,7 +91,12 @@ fn lexical_evidence(text: &str, intent: IntentId) -> i32 {
         INTENT_NETWORK_INTERFACES
             if text.contains("network interface")
                 || text.contains("what network am i connected")
-                || text.contains("how am i connected") =>
+                || text.contains("how am i connected")
+                || ((text.contains("wifi") || text.contains("wi-fi"))
+                    && (text.contains("connected")
+                        || text.contains("network")
+                        || text.contains("signal")
+                        || text.contains("strength"))) =>
         {
             160
         }
@@ -556,6 +561,20 @@ mod tests {
         };
         assert_eq!(m.intent, INTENT_GIT_DIFF);
         assert!(m.target.is_some());
+        let _ = std::fs::remove_file(p);
+    }
+
+    #[test]
+    fn wifi_question_stays_on_the_deterministic_network_path() {
+        let p = std::env::temp_dir().join(format!("damon-wifi-lang-{}.data", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        let d = DamonData::open(&p).unwrap();
+        let Interpretation::Resolved(meaning) =
+            understand("what wifi network am i connected to", &d)
+        else {
+            panic!("Wi-Fi question should resolve without a model")
+        };
+        assert_eq!(meaning.intent, INTENT_NETWORK_INTERFACES);
         let _ = std::fs::remove_file(p);
     }
 

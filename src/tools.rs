@@ -198,38 +198,43 @@ pub fn execute(action: &Action, policy: &crate::policy::Policy) -> ToolResult {
 fn inspect_interfaces() -> ToolResult {
     match crate::network::interface::discover() {
         Ok(interfaces) => {
-            let lines = interfaces
-                .iter()
-                .map(|interface| {
-                    let kind = format!("{:?}", interface.kind).to_ascii_lowercase();
-                    let state = match (interface.state.up, interface.state.running) {
-                        (true, true) => "up and running",
-                        (true, false) => "up",
-                        _ => "down",
-                    };
-                    let addresses = if interface.addresses.is_empty() {
-                        "no addresses observed".to_string()
-                    } else {
-                        interface
-                            .addresses
-                            .iter()
-                            .map(|address| format!("{}/{}", address.address, address.prefix))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    };
-                    let mac = interface.mac.map_or_else(
-                        || "MAC not observed".to_string(),
-                        |mac| format!("MAC {mac}"),
-                    );
-                    let mtu = interface
-                        .mtu
-                        .map_or_else(|| "MTU unknown".to_string(), |mtu| format!("MTU {mtu}"));
-                    format!(
-                        "{} (index {}, {kind}) is {state}; {addresses}; {mac}; {mtu}.",
-                        interface.name, interface.index
-                    )
-                })
-                .collect::<Vec<_>>();
+            let mut lines = crate::network::wifi::discover()
+                .map(|links| render_wifi_links(&links))
+                .unwrap_or_default();
+            lines.extend(
+                interfaces
+                    .iter()
+                    .map(|interface| {
+                        let kind = format!("{:?}", interface.kind).to_ascii_lowercase();
+                        let state = match (interface.state.up, interface.state.running) {
+                            (true, true) => "up and running",
+                            (true, false) => "up",
+                            _ => "down",
+                        };
+                        let addresses = if interface.addresses.is_empty() {
+                            "no addresses observed".to_string()
+                        } else {
+                            interface
+                                .addresses
+                                .iter()
+                                .map(|address| format!("{}/{}", address.address, address.prefix))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        };
+                        let mac = interface.mac.map_or_else(
+                            || "MAC not observed".to_string(),
+                            |mac| format!("MAC {mac}"),
+                        );
+                        let mtu = interface
+                            .mtu
+                            .map_or_else(|| "MTU unknown".to_string(), |mtu| format!("MTU {mtu}"));
+                        format!(
+                            "{} (index {}, {kind}) is {state}; {addresses}; {mac}; {mtu}.",
+                            interface.name, interface.index
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            );
             ToolResult {
                 success: true,
                 stdout: if lines.is_empty() {
@@ -243,6 +248,50 @@ fn inspect_interfaces() -> ToolResult {
         }
         Err(error) => tool_error("Network interface discovery failed", error),
     }
+}
+
+fn render_wifi_links(links: &[crate::network::wifi::WifiLink]) -> Vec<String> {
+    use crate::network::wifi::{Band, ConnectionState};
+    links
+        .iter()
+        .map(|link| {
+            if link.state != ConnectionState::Connected {
+                return format!("Wi-Fi interface {} is disconnected.", link.interface_name);
+            }
+            let network = link.ssid.map_or_else(
+                || "a privacy-redacted network".to_string(),
+                |ssid| format!("“{ssid}”"),
+            );
+            let band = match link.band {
+                Some(Band::Ghz2) => Some("2.4 GHz"),
+                Some(Band::Ghz5) => Some("5 GHz"),
+                Some(Band::Ghz6) => Some("6 GHz"),
+                Some(Band::Unknown) | None => None,
+            };
+            let mut details = Vec::new();
+            if let Some(band) = band {
+                details.push(band.to_string());
+            }
+            if let Some(channel) = link.channel {
+                details.push(format!("channel {channel}"));
+            }
+            if let Some(signal) = link.signal_dbm {
+                details.push(format!("signal {signal} dBm"));
+            }
+            if let Some(rate) = link.link_rate_mbps {
+                details.push(format!("link rate {rate} Mbps"));
+            }
+            let suffix = if details.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", details.join(", "))
+            };
+            format!(
+                "Wi-Fi interface {} is connected to {network}{suffix}.",
+                link.interface_name
+            )
+        })
+        .collect()
 }
 
 fn inspect_routes() -> ToolResult {
@@ -904,4 +953,31 @@ fn changed_files(cwd: &str) -> ToolResult {
         result.stdout=format!("Files in yesterday's commits by {}:\n{}\nGit does not record when uncommitted edits were made.",email.stdout.trim(),if names.is_empty(){"None.".into()} else {names.join("\n")});
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wifi_state_renders_as_direct_evidence() {
+        use crate::network::wifi::{Band, ConnectionState, SecurityMode, Ssid, WifiLink};
+        let lines = render_wifi_links(&[WifiLink {
+            interface: Some(crate::network::InterfaceId(1)),
+            interface_name: "en0".into(),
+            state: ConnectionState::Connected,
+            ssid: Some(Ssid::from_utf8("Home").unwrap()),
+            bssid: None,
+            channel: Some(44),
+            band: Some(Band::Ghz5),
+            signal_dbm: Some(-48),
+            noise_dbm: None,
+            link_rate_mbps: Some(866),
+            security: SecurityMode::Wpa3,
+        }]);
+        assert_eq!(
+            lines,
+            ["Wi-Fi interface en0 is connected to “Home” (5 GHz, channel 44, signal -48 dBm, link rate 866 Mbps)."]
+        );
+    }
 }

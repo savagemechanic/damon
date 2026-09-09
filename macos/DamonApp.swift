@@ -55,6 +55,17 @@ private final class DamonSession: ObservableObject, @unchecked Sendable {
         process.executableURL = executable
         process.arguments = ["--chat-stdio"]
         process.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            environment["PATH"] ?? "",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin"
+        ].joined(separator: ":")
+        process.environment = environment
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
         process.standardError = errorPipe

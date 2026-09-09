@@ -59,7 +59,7 @@ impl Damon {
                                 teacher = Some((provider, latency_ms));
                                 m
                             }
-                            Err(e) => return format!("I don't know how to do that yet. {e}"),
+                            Err(_) => return teacher_unavailable(),
                         }
                     }
                 } else {
@@ -71,7 +71,7 @@ impl Damon {
                     teacher = Some((provider, latency_ms));
                     m
                 }
-                Err(e) => return format!("I don't know how to do that yet. {e}"),
+                Err(_) => return teacher_unavailable(),
             },
         };
 
@@ -371,6 +371,10 @@ fn conversational_response(input: &str) -> Option<String> {
         );
     }
     None
+}
+
+fn teacher_unavailable() -> String {
+    "I couldn't resolve that request with my built-in language support, and no optional language teacher returned a valid meaning. Try rephrasing it or type “help”.".into()
 }
 
 fn action_risk(effects: crate::types::Effects) -> u8 {
