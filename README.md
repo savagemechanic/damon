@@ -111,7 +111,34 @@ Configure a local escalation chain (cheapest/fastest first):
 DAMON_MODELS=qwen3:8b,qwen3:14b damon ask "fix the failing test"
 ```
 
-Damon starts with the first eligible route and escalates only after deterministic evidence such as repeated tool failures or a provider generation failure. Escalation is bounded, monotonic within a run, and can be constrained to local models. Cloud providers will plug into the same router interface later; the agent loop does not need to change.
+Damon starts with the first eligible route and escalates only after deterministic evidence such as repeated tool failures or a provider generation failure. Escalation is bounded and monotonic within a run. Cloud routes are opt-in and the agent loop does not know which provider is serving a request.
+
+### Optional cloud fallbacks
+
+OpenCode Zen and OpenRouter can be added after the local chain without adding SDK dependencies. Credentials are read from environment variables and are never embedded in route configuration.
+
+Use a free OpenCode Zen fallback:
+
+```bash
+export OPENCODE_API_KEY=...
+DAMON_MODELS=qwen3:8b,qwen3:14b \
+DAMON_ZEN_FREE_MODEL=mimo-v2.5-free \
+  damon ask --allow-cloud "fix the failing test"
+```
+
+Paid routes require both an explicit run budget and a conservative per-request ceiling. Damon refuses a paid request when its ceiling cannot fit inside the remaining budget:
+
+```bash
+export OPENROUTER_API_KEY=...
+DAMON_OPENROUTER_MODEL=provider/model \
+DAMON_OPENROUTER_INPUT_RATE=1.0 \
+DAMON_OPENROUTER_OUTPUT_RATE=2.0 \
+DAMON_OPENROUTER_REQUEST_CEILING=0.25 \
+DAMON_MAX_SPEND_USD=1.00 \
+  damon ask --allow-cloud "finish this coding task"
+```
+
+Token rates are used for telemetry; the request ceiling is the hard preflight guard. `--local-only` overrides cloud configuration and removes all non-local routes.
 
 ## Architecture
 
@@ -187,6 +214,8 @@ This is only the start. A production release still needs stronger sandboxing, ap
 - [x] SQLite jobs
 - [x] deterministic verification
 - [x] local-first model router with bounded escalation
+- [x] OpenAI-compatible cloud provider adapter (OpenCode Zen / OpenRouter / similar)
+- [x] explicit cloud opt-in and conservative paid-request budget guards
 - [x] CLI and tests
 - [ ] structured patch/edit planner
 - [ ] automatic test/lint/typecheck discovery

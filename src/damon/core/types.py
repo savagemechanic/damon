@@ -36,7 +36,14 @@ class ToolCall:
 
 
 @dataclass(slots=True)
+class ModelUsage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+@dataclass(slots=True)
 class ModelResponse:
     content: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     done: bool = True
+    usage: ModelUsage = field(default_factory=ModelUsage)

@@ -11,6 +11,7 @@ from pathlib import Path
 from damon.core.agent import Agent
 from damon.models.ollama import OllamaModel
 from damon.models.router import ModelCandidate, ModelRouter, ModelTier, RouterPolicy
+from damon.models.providers import opencode_zen, openrouter
 from damon.policy.engine import Policy
 from damon.runtime.bootstrap import default_registry
 from damon.runtime.executor import ToolExecutor
@@ -30,6 +31,13 @@ def _parser() -> argparse.ArgumentParser:
         help="comma-separated Ollama escalation chain, cheapest first",
     )
     ask.add_argument("--local-only", action="store_true", help="forbid non-local model routes")
+    ask.add_argument("--allow-cloud", action="store_true", help="allow explicitly configured cloud routes")
+    ask.add_argument("--max-spend-usd", type=float, default=float(os.getenv("DAMON_MAX_SPEND_USD", "0")))
+    ask.add_argument("--zen-free-model", default=os.getenv("DAMON_ZEN_FREE_MODEL"), help="OpenCode Zen free fallback")
+    ask.add_argument("--openrouter-model", default=os.getenv("DAMON_OPENROUTER_MODEL"), help="paid OpenRouter fallback")
+    ask.add_argument("--openrouter-input-rate", type=float, default=float(os.getenv("DAMON_OPENROUTER_INPUT_RATE", "0")), help="USD per million input tokens")
+    ask.add_argument("--openrouter-output-rate", type=float, default=float(os.getenv("DAMON_OPENROUTER_OUTPUT_RATE", "0")), help="USD per million output tokens")
+    ask.add_argument("--openrouter-request-ceiling", type=float, default=float(os.getenv("DAMON_OPENROUTER_REQUEST_CEILING", "0")), help="conservative maximum USD reserved for each paid request")
     ask.add_argument("--ollama-url", default=os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434"))
 
     sub.add_parser("tools", help="list available native tools")
@@ -59,7 +67,35 @@ def _router(args: argparse.Namespace) -> ModelRouter:
         )
         for index, name in enumerate(names)
     ]
-    return ModelRouter(candidates, policy=RouterPolicy(local_only=args.local_only))
+    if args.zen_free_model:
+        candidates.append(
+            ModelCandidate(
+                name=f"zen:{args.zen_free_model}",
+                model=opencode_zen(args.zen_free_model),
+                tier=ModelTier.CLOUD_FREE,
+                local=False,
+            )
+        )
+    if args.openrouter_model:
+        candidates.append(
+            ModelCandidate(
+                name=f"openrouter:{args.openrouter_model}",
+                model=openrouter(args.openrouter_model),
+                tier=ModelTier.CLOUD_PAID,
+                local=False,
+                input_usd_per_million=args.openrouter_input_rate,
+                output_usd_per_million=args.openrouter_output_rate,
+                request_cost_ceiling_usd=args.openrouter_request_ceiling,
+            )
+        )
+    return ModelRouter(
+        candidates,
+        policy=RouterPolicy(
+            local_only=args.local_only,
+            allow_cloud=args.allow_cloud,
+            max_spend_usd=args.max_spend_usd,
+        ),
+    )
 
 
 async def _ask(args: argparse.Namespace) -> int:

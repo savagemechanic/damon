@@ -117,3 +117,67 @@ def test_router_rejects_empty_eligible_set():
         ModelRouter([
             ModelCandidate("cloud", cloud, ModelTier.CLOUD_FREE, local=False),
         ], policy=RouterPolicy(local_only=True))
+
+
+def test_cloud_is_opt_in_even_when_candidate_exists():
+    local = StaticModel("local")
+    cloud = StaticModel("cloud")
+    router = ModelRouter([
+        ModelCandidate("local", local),
+        ModelCandidate("cloud", cloud, ModelTier.CLOUD_FREE, local=False),
+    ])
+    assert [candidate.name for candidate in router.candidates] == ["local"]
+
+
+def test_free_cloud_allowed_without_spend_budget():
+    cloud = StaticModel("cloud")
+    router = ModelRouter([
+        ModelCandidate("cloud", cloud, ModelTier.CLOUD_FREE, local=False),
+    ], policy=RouterPolicy(allow_cloud=True))
+    assert router.current.name == "cloud"
+
+
+def test_paid_cloud_requires_positive_budget():
+    paid = StaticModel("paid")
+    with pytest.raises(ValueError, match="no eligible candidates"):
+        ModelRouter([
+            ModelCandidate("paid", paid, ModelTier.CLOUD_PAID, local=False, input_usd_per_million=1.0, request_cost_ceiling_usd=0.25),
+        ], policy=RouterPolicy(allow_cloud=True, max_spend_usd=0))
+
+
+async def test_router_accounts_estimated_spend():
+    from damon.core.types import ModelUsage
+
+    class UsageModel:
+        async def generate(self, messages, tools):
+            return ModelResponse(content="ok", usage=ModelUsage(input_tokens=1_000_000, output_tokens=500_000))
+
+    router = ModelRouter([
+        ModelCandidate(
+            "paid", UsageModel(), ModelTier.CLOUD_PAID, local=False,
+            input_usd_per_million=1.0, output_usd_per_million=2.0, request_cost_ceiling_usd=5.0,
+        ),
+    ], policy=RouterPolicy(allow_cloud=True, max_spend_usd=10.0))
+    await router.generate([], [])
+    assert router.stats.estimated_spend_usd == pytest.approx(2.0)
+    assert router.stats.input_tokens == 1_000_000
+    assert router.stats.output_tokens == 500_000
+
+
+async def test_paid_route_refuses_request_when_ceiling_exceeds_remaining_budget():
+    from damon.core.types import ModelUsage
+
+    class UsageModel:
+        async def generate(self, messages, tools):
+            return ModelResponse(content="ok", usage=ModelUsage(input_tokens=500_000))
+
+    model = UsageModel()
+    router = ModelRouter([
+        ModelCandidate(
+            "paid", model, ModelTier.CLOUD_PAID, local=False,
+            input_usd_per_million=1.0, request_cost_ceiling_usd=0.75,
+        ),
+    ], policy=RouterPolicy(allow_cloud=True, max_spend_usd=1.0))
+    await router.generate([], [])
+    with pytest.raises(RuntimeError, match="exceeds remaining spend budget"):
+        await router.generate([], [])
