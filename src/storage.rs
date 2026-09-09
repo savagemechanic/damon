@@ -128,6 +128,7 @@ pub struct Store {
     pub generation: u64,
     pub warnings: Vec<String>,
     journal_len: usize,
+    checkpoint: Option<Vec<u8>>,
     poisoned: bool,
 }
 impl Drop for Store {
@@ -171,6 +172,7 @@ impl Store {
             generation: 0,
             warnings: vec![],
             journal_len: 0,
+            checkpoint: None,
             poisoned: false,
         };
         let mut best = None;
@@ -194,6 +196,7 @@ impl Store {
                         Ok((g, p)) if best.is_none() || g > store.generation => {
                             store.generation = g;
                             best = Some(p.to_vec());
+                            store.checkpoint = Some(bytes.clone());
                         }
                         Ok(_) => {}
                         Err(e) => store.warnings.push(format!(
@@ -290,18 +293,13 @@ impl Store {
         result
     }
     fn snapshot(&mut self, bytes: &[u8]) -> io::Result<()> {
-        match read_bounded(&self.path, MAX_IMAGE + HEADER) {
-            Ok(old) => {
-                if unframe(&old).is_ok_and(|(_, _, n)| n == old.len())
-                    || old.starts_with(b"DAMON\0\x01\0")
-                {
-                    atomic_write(&side(&self.path, ".prev"), &old)?;
-                }
-            }
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e),
+        // Retain only the snapshot that was fully validated on open (or that
+        // this writer committed). Never promote a corrupt primary to .prev.
+        if let Some(old) = &self.checkpoint {
+            atomic_write(&side(&self.path, ".prev"), old)?;
         }
         atomic_write(&self.path, bytes)?;
+        self.checkpoint = Some(bytes.to_vec());
         let journal = private_options()
             .truncate(true)
             .open(side(&self.path, ".journal"))?;

@@ -263,3 +263,19 @@ fn teacher_answers_are_not_learned_when_execution_fails() {
         .is_empty());
     assert_eq!(runtime.data.experiences.last().unwrap().reward, -1);
 }
+
+#[test]
+fn corrupt_legacy_primary_cannot_replace_known_good_previous() {
+    let f = Fixture::new();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v1-seed.data");
+    fs::copy(fixture, f.side(".prev")).unwrap();
+    fs::write(f.path(), b"DAMON\0\x01\0truncated").unwrap();
+    let mut d = DamonData::open(f.path()).unwrap();
+    d.compact().unwrap();
+    drop(d);
+    fs::write(f.path(), b"corrupt again").unwrap();
+    assert!(DamonData::open(f.path())
+        .unwrap()
+        .resolve("damon")
+        .is_some());
+}
