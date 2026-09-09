@@ -49,19 +49,22 @@ shell, tool calls, threads, or exception handlers in model-facing IR.
 Prompt assembly selects only relevant actions, predicates, entity kinds, slots,
 focus, and previous action. When no word cue is strong enough, the complete v1
 action set is still only twelve IDs and is exposed so unfamiliar phrasing is not
-blocked before Ollama can interpret it. All providers share the checked-in templates at
+blocked before a model can interpret it. All providers share the checked-in templates at
 `prompts/semantic-ir-v1.txt` and `prompts/semantic-ir-v1-compact.txt`. The full
 template carries the strict JSON shape for providers without schema enforcement;
 the compact template is intended for constrained local decoding. Unknown fields,
 invented concepts, invented slots, invalid spans, and unsupported meanings fail
-closed. Ollama also receives a generated JSON shape whose concept and predicate
-enums match the exact request. A rejected meaning gets at most one fresh repair
-attempt. There is no unbounded repair loop.
+closed. A rejected meaning gets at most one fresh repair attempt. A provider
+adapter cannot retry internally, so one meaning request makes at most two model
+calls. There is no unbounded repair loop.
 
-The Ollama adapter is a standard-library HTTP/1.1 client. It discovers installed
-models from the local service, streams bounded response rows, and reports a
-`thinking` state only when a non-empty thinking field is observed. The macOS
-model picker stores the user's selection and re-applies it on the next launch.
+OpenCode Zen is the default optional teacher when the user supplies a key. Damon
+uses `ureq` and `rustls` for bounded HTTPS, fetches Zen's current model catalog,
+and exposes only free models supported by the initial chat-completions adapter.
+The API key is stored in macOS Keychain and passed privately to the child runtime;
+it is never stored in `damon.data`. The model picker stores only the model ID.
+Ollama is disabled by default but remains an explicitly configured fallback. Its
+adapter reports `thinking` only after receiving a non-empty thinking field.
 
 Models do not supply confidence. Damon scores schema validity, bound-entity
 quality, conversation context, learned counts, and candidate margin with integers.

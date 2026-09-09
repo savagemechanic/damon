@@ -213,3 +213,17 @@ execution, and verification path.
 Revision 8 remains readable and starts with an empty procedure table. The
 migration suite exercises every payload revision through revision 9, including
 the revision-8 topology boundary.
+
+## Payload revision 10: exact policy approvals
+
+Payload magic `DAMON\0\x0a\0` appends at most 4,096 sorted approval records after
+the learned-procedure table. Each record stores a capability ID, effects bits,
+optional target entity ID, stable scope hash, at most 64 KiB of canonical scope
+bytes, capability implementation version, and revocation bit. Scope covers the
+selected tool, target, argument count, and every length-prefixed argument.
+
+An approval matches only the identical capability, effects, target, scope bytes,
+and implementation version. The hash is only a lookup hint. Broader scope,
+stronger effects, or a changed implementation requires another explicit confirmation. Model output cannot add
+an approval. Revoked records remain non-authorizing. Revision 9 remains readable
+and starts with an empty approval table before the next save.

@@ -48,6 +48,7 @@ pub struct MeaningGraph {
 pub struct Action {
     pub capability: CapabilityId,
     pub tool: ToolId,
+    pub implementation_version: u32,
     pub target: Option<EntityId>,
     pub effects: Effects,
     pub args: Vec<String>,

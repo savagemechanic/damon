@@ -61,8 +61,8 @@ fn chat_stdio(damon: &mut Damon) -> Result<(), Box<dyn std::error::Error>> {
                     ),
                 )?;
             }
-            Ok(ChatRequest::ListModels) => match damon.models.ollama_models() {
-                Ok(models) => write_models(&mut stdout, &models, &damon.models.ollama_model)?,
+            Ok(ChatRequest::ListModels) => match damon.models.zen_models() {
+                Ok(models) => write_models(&mut stdout, &models, &damon.models.zen_model)?,
                 Err(error) => write_event(
                     &mut stdout,
                     &format!(
@@ -72,7 +72,7 @@ fn chat_stdio(damon: &mut Damon) -> Result<(), Box<dyn std::error::Error>> {
                 )?,
             },
             Ok(ChatRequest::SelectModel(model)) => {
-                let result = damon.models.select_ollama_model(&model);
+                let result = damon.models.select_zen_model(&model);
                 let (ok, message) = match result {
                     Ok(()) => (true, format!("Using {model}.")),
                     Err(error) => (false, error),
@@ -81,7 +81,21 @@ fn chat_stdio(damon: &mut Damon) -> Result<(), Box<dyn std::error::Error>> {
                     &mut stdout,
                     &format!(
                         "{{\"type\":\"model_selected\",\"ok\":{ok},\"model\":{},\"message\":{}}}",
-                        damon::json::quoted(&damon.models.ollama_model),
+                        damon::json::quoted(&damon.models.zen_model),
+                        damon::json::quoted(&message)
+                    ),
+                )?;
+            }
+            Ok(ChatRequest::SetApiKey(key)) => {
+                let result = damon.models.set_zen_api_key(key);
+                let (ok, message) = match result {
+                    Ok(()) => (true, "OpenCode Zen key accepted in memory.".to_string()),
+                    Err(error) => (false, error),
+                };
+                write_event(
+                    &mut stdout,
+                    &format!(
+                        "{{\"type\":\"api_key\",\"ok\":{ok},\"message\":{}}}",
                         damon::json::quoted(&message)
                     ),
                 )?;
@@ -102,6 +116,7 @@ enum ChatRequest {
     Message(String),
     ListModels,
     SelectModel(String),
+    SetApiKey(String),
 }
 
 fn chat_request(line: &str) -> Result<ChatRequest, String> {
@@ -109,7 +124,7 @@ fn chat_request(line: &str) -> Result<ChatRequest, String> {
         return Ok(ChatRequest::Message(line.to_owned()));
     }
     let value = damon::json::parse(line)?;
-    value.fields_exact(&["type", "text", "model"])?;
+    value.fields_exact(&["type", "text", "model", "key"])?;
     let kind = value
         .get("type")
         .and_then(damon::json::Value::as_str)
@@ -127,6 +142,11 @@ fn chat_request(line: &str) -> Result<ChatRequest, String> {
             .and_then(damon::json::Value::as_str)
             .map(|model| ChatRequest::SelectModel(model.to_owned()))
             .ok_or_else(|| "model name is missing".into()),
+        "set_api_key" => value
+            .get("key")
+            .and_then(damon::json::Value::as_str)
+            .map(|key| ChatRequest::SetApiKey(key.to_owned()))
+            .ok_or_else(|| "API key is missing".into()),
         _ => Err("unknown request type".into()),
     }
 }

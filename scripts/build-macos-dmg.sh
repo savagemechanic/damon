@@ -26,13 +26,15 @@ swiftc -parse-as-library \
   "$repo_dir/macos/DamonApp.swift" \
   -o "$release_dir/Damon-arm64" \
   -framework SwiftUI \
-  -framework AppKit
+  -framework AppKit \
+  -framework Security
 swiftc -parse-as-library \
   -target x86_64-apple-macosx13.0 \
   "$repo_dir/macos/DamonApp.swift" \
   -o "$release_dir/Damon-x86_64" \
   -framework SwiftUI \
-  -framework AppKit
+  -framework AppKit \
+  -framework Security
 lipo -create \
   "$release_dir/Damon-arm64" \
   "$release_dir/Damon-x86_64" \

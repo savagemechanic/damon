@@ -1,5 +1,4 @@
 use std::{
-    cell::Cell,
     env,
     io::{BufRead, BufReader, Read, Write},
     net::{TcpStream, ToSocketAddrs},
@@ -22,6 +21,7 @@ pub enum ProviderKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelEvent {
     AskingOllama,
+    AskingCloud,
     Thinking,
     Processing,
 }
@@ -37,26 +37,30 @@ pub struct ModelRouter {
     pub ollama_model: String,
     pub ollama_host: String,
     pub external_command: Option<String>,
-    pub cloud_command: Option<String>,
+    pub zen_model: String,
+    pub zen_api_key: Option<String>,
+    pub zen_base_url: String,
     pub allow_cloud: bool,
-    pub cloud_call_limit: u32,
-    cloud_calls: Cell<u32>,
 }
 
 impl Default for ModelRouter {
     fn default() -> Self {
+        let zen_api_key = env::var("DAMON_OPENCODE_API_KEY")
+            .ok()
+            .filter(|key| !key.is_empty());
         Self {
-            ollama_model: env::var("DAMON_OLLAMA_MODEL").unwrap_or_else(|_| "qwen3:8b".into()),
+            ollama_model: env::var("DAMON_OLLAMA_MODEL").unwrap_or_default(),
             ollama_host: env::var("DAMON_OLLAMA_HOST").unwrap_or_else(|_| "127.0.0.1:11434".into()),
             external_command: env::var("DAMON_MODEL_COMMAND").ok(),
-            cloud_command: env::var("DAMON_CLOUD_COMMAND").ok(),
-            allow_cloud: env::var("DAMON_ALLOW_CLOUD")
-                .is_ok_and(|value| value == "1" || value.eq_ignore_ascii_case("true")),
-            cloud_call_limit: env::var("DAMON_CLOUD_CALL_LIMIT")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(1),
-            cloud_calls: Cell::new(0),
+            zen_model: env::var("DAMON_ZEN_MODEL").unwrap_or_else(|_| "big-pickle".into()),
+            allow_cloud: zen_api_key.is_some(),
+            zen_api_key,
+            zen_base_url: if cfg!(debug_assertions) {
+                env::var("DAMON_ZEN_BASE_URL")
+                    .unwrap_or_else(|_| "https://opencode.ai/zen/v1".into())
+            } else {
+                "https://opencode.ai/zen/v1".into()
+            },
         }
     }
 }
@@ -105,18 +109,20 @@ impl ModelRouter {
             return Err("teacher context exceeds 64 KiB".into());
         }
         self.route(validate, |provider| match provider {
+            ProviderKind::Cloud => {
+                event(ModelEvent::AskingCloud);
+                let result = self.zen_chat(prompt);
+                event(ModelEvent::Processing);
+                result
+            }
             ProviderKind::Ollama => {
                 event(ModelEvent::AskingOllama);
                 let result = self.ollama_chat(prompt, format, event);
                 event(ModelEvent::Processing);
                 result
             }
-            ProviderKind::External | ProviderKind::Cloud => {
-                let command = if provider == ProviderKind::External {
-                    &self.external_command
-                } else {
-                    &self.cloud_command
-                };
+            ProviderKind::External => {
+                let command = &self.external_command;
                 let result = crate::process::run(
                     Path::new("."),
                     "sh",
@@ -176,23 +182,114 @@ impl ModelRouter {
         Ok(())
     }
 
+    pub fn set_zen_api_key(&mut self, key: String) -> Result<(), String> {
+        if key.len() < 8
+            || key.len() > 4096
+            || key
+                .bytes()
+                .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+        {
+            return Err("invalid OpenCode Zen API key".into());
+        }
+        self.zen_api_key = Some(key);
+        self.allow_cloud = true;
+        Ok(())
+    }
+
+    pub fn zen_models(&self) -> Result<Vec<String>, String> {
+        let text = self.zen_request("GET", "/models", None, false)?;
+        zen_models_from_json(&text)
+    }
+
+    pub fn select_zen_model(&mut self, model: &str) -> Result<(), String> {
+        validate_model_name(model)?;
+        if !self
+            .zen_models()?
+            .iter()
+            .any(|available| available == model)
+        {
+            return Err("that free model is not currently available from OpenCode Zen".into());
+        }
+        self.zen_model = model.to_owned();
+        Ok(())
+    }
+
+    fn zen_chat(&self, prompt: &str) -> Result<String, String> {
+        self.zen_api_key
+            .as_deref()
+            .ok_or("OpenCode Zen API key is not configured")?;
+        validate_model_name(&self.zen_model)?;
+        if !is_free_chat_model(&self.zen_model) {
+            return Err("selected OpenCode Zen model is not a supported free chat model".into());
+        }
+        let body = format!(
+            "{{\"model\":{},\"messages\":[{{\"role\":\"user\",\"content\":{}}}],\"temperature\":0,\"stream\":false}}",
+            crate::json::quoted(&self.zen_model),
+            crate::json::quoted(prompt)
+        );
+        let text = self.zen_request("POST", "/chat/completions", Some(&body), true)?;
+        let root = crate::json::parse(&text)?;
+        root.get("choices")
+            .and_then(crate::json::Value::as_array)
+            .and_then(|choices| choices.first())
+            .and_then(|choice| choice.get("message"))
+            .and_then(|message| message.get("content"))
+            .and_then(crate::json::Value::as_str)
+            .filter(|answer| !answer.trim().is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| "OpenCode Zen returned no answer".into())
+    }
+
+    fn zen_request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&str>,
+        authenticate: bool,
+    ) -> Result<String, String> {
+        let url = format!("{}{path}", self.zen_base_url.trim_end_matches('/'));
+        let config = ureq::Agent::config_builder()
+            .timeout_global(Some(TIMEOUT))
+            .build();
+        let agent: ureq::Agent = config.into();
+        let response = match (method, body) {
+            ("GET", None) => agent.get(&url).call(),
+            ("POST", Some(body)) => {
+                let key = self
+                    .zen_api_key
+                    .as_deref()
+                    .ok_or("OpenCode Zen API key is not configured")?;
+                let request = agent
+                    .post(&url)
+                    .header("Authorization", &format!("Bearer {key}"))
+                    .header("Content-Type", "application/json");
+                request.send(body)
+            }
+            _ => return Err("unsupported Zen request shape".into()),
+        };
+        let mut response = response.map_err(|error| {
+            let operation = if authenticate {
+                "model request"
+            } else {
+                "model catalog"
+            };
+            format!("OpenCode Zen {operation} failed: {error}")
+        })?;
+        response
+            .body_mut()
+            .with_config()
+            .limit(MAX_RESPONSE_BYTES as u64)
+            .read_to_string()
+            .map_err(|error| format!("OpenCode Zen response is invalid or too large: {error}"))
+    }
+
     fn ollama_chat(
         &self,
         prompt: &str,
         format: &str,
         event: &mut impl FnMut(ModelEvent),
     ) -> Result<String, String> {
-        match self.ollama_chat_once(prompt, format, true, event) {
-            Err(error) if is_ollama_compatibility_error(&error) => {
-                match self.ollama_chat_once(prompt, format, false, event) {
-                    Err(error) if format != "\"json\"" && is_ollama_compatibility_error(&error) => {
-                        self.ollama_chat_once(prompt, "\"json\"", false, event)
-                    }
-                    result => result,
-                }
-            }
-            result => result,
-        }
+        self.ollama_chat_once(prompt, format, true, event)
     }
 
     fn ollama_chat_once(
@@ -255,55 +352,58 @@ impl ModelRouter {
         validate: impl Fn(&str) -> Result<(), String>,
         mut run: impl FnMut(ProviderKind) -> Result<String, String>,
     ) -> Result<RoutedResponse, String> {
-        let mut failures = Vec::new();
-        for provider in [
-            ProviderKind::Ollama,
-            ProviderKind::External,
-            ProviderKind::Cloud,
-        ] {
-            let enabled = match provider {
+        let provider = [ProviderKind::Cloud, ProviderKind::External, ProviderKind::Ollama]
+            .into_iter()
+            .find(|provider| match provider {
                 ProviderKind::Ollama => !self.ollama_model.is_empty(),
                 ProviderKind::External => self.external_command.is_some(),
-                ProviderKind::Cloud => {
-                    self.allow_cloud
-                        && self.cloud_command.is_some()
-                        && self.cloud_calls.get() < self.cloud_call_limit
-                }
-            };
-            if !enabled {
-                continue;
-            }
-            if provider == ProviderKind::Cloud {
-                self.cloud_calls.set(self.cloud_calls.get() + 1);
-            }
-            match run(provider).and_then(|text| {
-                if text.trim().is_empty() {
-                    return Err("empty provider response".into());
-                }
-                validate(&text)?;
-                Ok(text)
-            }) {
-                Ok(text) => return Ok(RoutedResponse { provider, text }),
-                Err(error) => failures.push(format!("{provider:?}: {error}")),
-            }
+                ProviderKind::Cloud => self.allow_cloud && self.zen_api_key.is_some(),
+            })
+            .ok_or(
+                "No language teacher is configured. Add an OpenCode Zen API key or explicitly enable another provider.",
+            )?;
+        let text = run(provider).map_err(|error| format!("{provider:?}: {error}"))?;
+        if text.trim().is_empty() {
+            return Err(format!("{provider:?}: empty provider response"));
         }
-        Err(format!(
-            "No valid teacher response. {}. Cloud requires explicit enablement and an available call budget.",
-            failures.join("; ")
-        ))
+        validate(&text).map_err(|error| format!("{provider:?}: {error}"))?;
+        Ok(RoutedResponse { provider, text })
     }
 }
 
-fn is_ollama_compatibility_error(error: &str) -> bool {
-    let lower = error.to_ascii_lowercase();
-    let compatible_status = error.contains("HTTP 400")
-        || error.contains("HTTP 422")
-        || error.contains("HTTP 500")
-        || error.contains("Ollama stream error");
-    compatible_status
-        && ["think", "format", "schema", "structured", "support"]
-            .iter()
-            .any(|word| lower.contains(word))
+fn validate_model_name(model: &str) -> Result<(), String> {
+    if model.is_empty()
+        || model.len() > 256
+        || model
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+    {
+        Err("invalid model name".into())
+    } else {
+        Ok(())
+    }
+}
+
+fn is_free_chat_model(model: &str) -> bool {
+    (model == "big-pickle" || model.ends_with("-free")) && !model.starts_with("muse-spark-")
+}
+
+fn zen_models_from_json(text: &str) -> Result<Vec<String>, String> {
+    let root = crate::json::parse(text)?;
+    let rows = root
+        .get("data")
+        .and_then(crate::json::Value::as_array)
+        .ok_or("OpenCode Zen model list is missing data")?;
+    let mut models = rows
+        .iter()
+        .filter_map(|row| row.get("id").and_then(crate::json::Value::as_str))
+        .filter(|model| validate_model_name(model).is_ok() && is_free_chat_model(model))
+        .map(str::to_owned)
+        .take(256)
+        .collect::<Vec<_>>();
+    models.sort();
+    models.dedup();
+    Ok(models)
 }
 
 fn http_request(
@@ -508,11 +608,11 @@ mod tests {
         ModelRouter {
             ollama_model: "local".into(),
             ollama_host: host,
-            external_command: Some("free".into()),
-            cloud_command: Some("paid".into()),
+            external_command: None,
+            zen_model: "big-pickle".into(),
+            zen_api_key: None,
+            zen_base_url: "https://opencode.ai/zen/v1".into(),
             allow_cloud: false,
-            cloud_call_limit: 1,
-            cloud_calls: Cell::new(0),
         }
     }
 
@@ -544,8 +644,9 @@ mod tests {
     }
 
     #[test]
-    fn disabled_cloud_is_never_invoked() {
-        let model = router("127.0.0.1:1".into());
+    fn one_inference_calls_only_the_highest_priority_enabled_provider() {
+        let mut model = router("127.0.0.1:1".into());
+        model.external_command = Some("free".into());
         let mut calls = vec![];
         assert!(model
             .route(
@@ -556,7 +657,7 @@ mod tests {
                 }
             )
             .is_err());
-        assert_eq!(calls, vec![ProviderKind::Ollama, ProviderKind::External]);
+        assert_eq!(calls, vec![ProviderKind::External]);
     }
 
     #[test]
@@ -652,83 +753,78 @@ mod tests {
     }
 
     #[test]
-    fn server_compatibility_error_retries_without_thinking() {
+    fn provider_adapter_never_retries_internally() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
-            for attempt in 0..2 {
-                let (mut socket, _) = listener.accept().unwrap();
-                let request = read_request_bytes(&mut socket);
-                let body = std::str::from_utf8(&request).unwrap();
-                if attempt == 0 {
-                    assert!(body.contains("\"think\":true"));
-                    let error = "{\"error\":\"thinking is not supported\"}";
-                    write!(
-                        socket,
-                        "HTTP/1.1 500 Error\r\nContent-Length: {}\r\n\r\n{}",
-                        error.len(),
-                        error
-                    )
-                    .unwrap();
-                } else {
-                    assert!(body.contains("\"think\":false"));
-                    let answer =
-                        "{\"message\":{\"content\":\"{\\\"ok\\\":true}\"},\"done\":true}\n";
-                    write!(
-                        socket,
-                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
-                        answer.len(),
-                        answer
-                    )
-                    .unwrap();
-                }
-            }
+            let (mut socket, _) = listener.accept().unwrap();
+            let request = read_request_bytes(&mut socket);
+            let body = std::str::from_utf8(&request).unwrap();
+            assert!(body.contains("\"think\":true"));
+            let error = "{\"error\":\"thinking is not supported\"}";
+            write!(
+                socket,
+                "HTTP/1.1 500 Error\r\nContent-Length: {}\r\n\r\n{}",
+                error.len(),
+                error
+            )
+            .unwrap();
         });
         let model = router(address.to_string());
-        let response = model
+        assert!(model
             .ollama_chat("prompt", "\"json\"", &mut |_| {})
-            .unwrap();
-        assert_eq!(response, r#"{"ok":true}"#);
+            .is_err());
         server.join().unwrap();
     }
 
     #[test]
-    fn schema_compatibility_error_retries_with_plain_json() {
+    fn default_configuration_disables_ollama() {
+        std::env::remove_var("DAMON_OLLAMA_MODEL");
+        assert!(ModelRouter::default().ollama_model.is_empty());
+    }
+
+    #[test]
+    fn zen_catalog_keeps_only_free_chat_completion_models() {
+        let catalog = r#"{"object":"list","data":[
+            {"id":"gpt-5.6-sol"},
+            {"id":"big-pickle"},
+            {"id":"mimo-v2.5-free"},
+            {"id":"muse-spark-1.3-contributor-free"},
+            {"id":"nemotron-3-ultra-free"}
+        ]}"#;
+        assert_eq!(
+            zen_models_from_json(catalog).unwrap(),
+            vec!["big-pickle", "mimo-v2.5-free", "nemotron-3-ultra-free"]
+        );
+    }
+
+    #[test]
+    fn zen_chat_uses_bearer_key_and_extracts_one_answer() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
-            for attempt in 0..3 {
-                let (mut socket, _) = listener.accept().unwrap();
-                let request = read_request_bytes(&mut socket);
-                let body = std::str::from_utf8(&request).unwrap();
-                if attempt < 2 {
-                    assert!(body.contains("\"format\":{") && body.contains("\"type\":\"object\""));
-                    let error = "{\"error\":\"structured schema format is not supported\"}";
-                    write!(
-                        socket,
-                        "HTTP/1.1 400 Error\r\nContent-Length: {}\r\n\r\n{}",
-                        error.len(),
-                        error
-                    )
-                    .unwrap();
-                } else {
-                    assert!(body.contains("\"format\":\"json\""));
-                    assert!(body.contains("\"think\":false"));
-                    let answer =
-                        "{\"message\":{\"content\":\"{\\\"ok\\\":true}\"},\"done\":true}\n";
-                    write!(
-                        socket,
-                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
-                        answer.len(),
-                        answer
-                    )
-                    .unwrap();
-                }
-            }
+            let (mut socket, _) = listener.accept().unwrap();
+            let request = read_request_bytes(&mut socket);
+            let request = std::str::from_utf8(&request).unwrap();
+            assert!(request.starts_with("POST /chat/completions HTTP/1.1"));
+            assert!(request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer secret-test-key"));
+            assert!(request.contains("\"model\":\"big-pickle\""));
+            let answer = r#"{"choices":[{"message":{"content":"{\"ok\":true}"}}]}"#;
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                answer.len(),
+                answer
+            )
+            .unwrap();
         });
-        let model = router(address.to_string());
-        let schema = r#"{"type":"object"}"#;
-        let response = model.ollama_chat("prompt", schema, &mut |_| {}).unwrap();
+        let mut model = router("127.0.0.1:1".into());
+        model.zen_api_key = Some("secret-test-key".into());
+        model.zen_model = "big-pickle".into();
+        model.zen_base_url = format!("http://{address}");
+        let response = model.zen_chat("prompt").unwrap();
         assert_eq!(response, r#"{"ok":true}"#);
         server.join().unwrap();
     }
@@ -756,24 +852,5 @@ mod tests {
         model.select_ollama_model("a:2").unwrap();
         assert_eq!(model.ollama_model, "a:2");
         server.join().unwrap();
-    }
-
-    #[test]
-    fn paid_attempts_have_a_session_limit_even_on_failure() {
-        let mut model = router("127.0.0.1:1".into());
-        model.allow_cloud = true;
-        let mut paid = 0;
-        for _ in 0..3 {
-            let _ = model.route(
-                |_| Ok(()),
-                |provider| {
-                    if provider == ProviderKind::Cloud {
-                        paid += 1;
-                    }
-                    Err("offline".into())
-                },
-            );
-        }
-        assert_eq!(paid, 1);
     }
 }

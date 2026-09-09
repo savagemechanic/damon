@@ -1,4 +1,40 @@
 import SwiftUI
+import Security
+
+private enum SecretStore {
+    private static let service = "com.savagemechanic.damon"
+    private static let account = "opencode-zen-api-key"
+
+    static func load() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func save(_ secret: String) -> Bool {
+        guard let data = secret.data(using: .utf8) else { return false }
+        let identity: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        let update = [kSecValueData as String: data]
+        let status = SecItemUpdate(identity as CFDictionary, update as CFDictionary)
+        if status == errSecSuccess { return true }
+        guard status == errSecItemNotFound else { return false }
+        var item = identity
+        item[kSecValueData as String] = data
+        return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
+    }
+}
 
 private struct ChatEvent: Decodable {
     let type: String?
@@ -28,10 +64,13 @@ private final class DamonSession: ObservableObject, @unchecked Sendable {
     @Published var selectedModel = ""
     @Published var state = "Starting"
     @Published var modelMessage = ""
+    @Published var apiKeyInput = ""
+    @Published var hasApiKey = false
 
     private var process: Process?
     private var inputPipe: Pipe?
     private var pending = Data()
+    private var pendingApiKey: String?
 
     init() {
         start()
@@ -60,7 +99,19 @@ private final class DamonSession: ObservableObject, @unchecked Sendable {
             modelMessage = ""
             try writeCommand(["type": "list_models"], to: pipe)
         } catch {
-            modelMessage = "Could not ask Ollama for its models."
+            modelMessage = "Could not ask OpenCode Zen for its models."
+        }
+    }
+
+    func connectZen() {
+        let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, let pipe = inputPipe else { return }
+        do {
+            pendingApiKey = key
+            try writeCommand(["type": "set_api_key", "key": key], to: pipe)
+        } catch {
+            pendingApiKey = nil
+            modelMessage = "Could not send the API key to the local runtime."
         }
     }
 
@@ -125,6 +176,10 @@ private final class DamonSession: ObservableObject, @unchecked Sendable {
             self.inputPipe = inputPipe
             available = true
             state = "Ready"
+            if let key = SecretStore.load() {
+                pendingApiKey = key
+                try writeCommand(["type": "set_api_key", "key": key], to: inputPipe)
+            }
             refreshModels()
         } catch {
             messages.append(Message(fromDamon: true, text: "Damon could not start: \(error.localizedDescription)"))
@@ -157,7 +212,7 @@ private final class DamonSession: ObservableObject, @unchecked Sendable {
         case "models":
             models = event.models ?? []
             let configured = event.selected ?? ""
-            let preferred = UserDefaults.standard.string(forKey: "ollamaModel") ?? ""
+            let preferred = UserDefaults.standard.string(forKey: "zenModel") ?? ""
             let choice = models.contains(preferred)
                 ? preferred
                 : (models.contains(configured) ? configured : (models.first ?? ""))
@@ -165,17 +220,30 @@ private final class DamonSession: ObservableObject, @unchecked Sendable {
             if !choice.isEmpty && choice != configured {
                 selectModel(choice)
             }
-            modelMessage = models.isEmpty ? "No Ollama models installed" : "Ollama connected"
+            modelMessage = models.isEmpty ? "No supported free Zen models" : "OpenCode Zen connected"
         case "model_selected":
             if event.ok == true {
                 selectedModel = event.model ?? selectedModel
-                UserDefaults.standard.set(selectedModel, forKey: "ollamaModel")
+                UserDefaults.standard.set(selectedModel, forKey: "zenModel")
             }
             modelMessage = event.message ?? ""
+        case "api_key":
+            if event.ok == true, let key = pendingApiKey {
+                if SecretStore.save(key) {
+                    hasApiKey = true
+                    apiKeyInput = ""
+                    refreshModels()
+                } else {
+                    modelMessage = "The key works for this session but could not be saved in Keychain."
+                }
+            } else {
+                modelMessage = event.message ?? "OpenCode Zen rejected the key."
+            }
+            pendingApiKey = nil
         case "model_error":
             models = []
             selectedModel = ""
-            modelMessage = "Ollama is not connected"
+            modelMessage = event.message ?? "OpenCode Zen is not connected"
         default:
             break
         }
@@ -184,6 +252,7 @@ private final class DamonSession: ObservableObject, @unchecked Sendable {
     private func displayState(_ value: String) -> String {
         switch value {
         case "asking_ollama": return "Asking Ollama"
+        case "asking_cloud": return "Asking OpenCode Zen"
         case "thinking": return "Thinking"
         case "checking_meaning": return "Checking meaning"
         case "running": return "Running"
@@ -250,11 +319,22 @@ private struct ContentView: View {
                 Button(action: session.refreshModels) {
                     Image(systemName: "arrow.clockwise")
                 }
-                .help("Refresh Ollama models")
+                .help("Refresh OpenCode Zen models")
                 .disabled(!session.available)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
+            HStack(spacing: 10) {
+                SecureField(
+                    session.hasApiKey ? "Replace OpenCode Zen API key" : "OpenCode Zen API key",
+                    text: $session.apiKeyInput
+                )
+                .textFieldStyle(.roundedBorder)
+                Button(session.hasApiKey ? "Replace key" : "Connect", action: session.connectZen)
+                    .disabled(!session.available || session.apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
             Divider()
             ScrollViewReader { proxy in
                 ScrollView {

@@ -437,6 +437,11 @@ pub fn native_plan(
     let action = crate::types::Action {
         capability,
         tool,
+        implementation_version: data
+            .capabilities
+            .capability(capability)
+            .ok_or("unknown capability")?
+            .version,
         target,
         effects: crate::tools::required_effects(tool)?,
         args,

@@ -1,4 +1,8 @@
-use damon::{data::DamonData, types::IntentId};
+use damon::{
+    data::DamonData,
+    policy::ApprovalGrant,
+    types::{Action, CapabilityId, Effects, EntityId, IntentId, ToolId},
+};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -280,4 +284,26 @@ fn corrupt_legacy_primary_cannot_replace_known_good_previous() {
         .unwrap()
         .resolve("damon")
         .is_some());
+}
+
+#[test]
+fn exact_policy_approval_survives_reopen() {
+    let f = Fixture::new();
+    let action = Action {
+        capability: CapabilityId(14),
+        tool: ToolId(11),
+        implementation_version: 1,
+        target: Some(EntityId(0)),
+        effects: Effects::READ.union(Effects::WRITE),
+        args: vec!["/safe/project".into(), "copy.txt".into()],
+    };
+    let mut data = DamonData::open(f.path()).unwrap();
+    data.approvals
+        .approve(ApprovalGrant::from_action(&action))
+        .unwrap();
+    data.save().unwrap();
+    drop(data);
+
+    let data = DamonData::open(f.path()).unwrap();
+    assert!(data.approvals.allows(&action));
 }

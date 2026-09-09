@@ -115,6 +115,11 @@ pub fn action_for_capability(
     Ok(Action {
         capability,
         tool,
+        implementation_version: data
+            .capabilities
+            .capability(capability)
+            .ok_or("unknown capability")?
+            .version,
         target: Some(target),
         effects: required_effects(tool)?,
         args,

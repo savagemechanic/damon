@@ -3,8 +3,9 @@
 Damon is a local-first Rust runtime with natural English as its human interface.
 The `tao` branch uses compact IDs and arrays for memory, hashes for recognition,
 graphs for meaning, count-based uncertainty, and deterministic tools for work.
-Verified learned meanings and small exact rules are the fast path. Ollama reads
-new language into bounded meaning rows. It never executes actions directly.
+Verified learned meanings and small exact rules are the fast path. An optional
+language model reads new language into bounded meaning rows. It never executes
+actions directly.
 
 Networking starts with byte arrays, interfaces, addresses, packets, neighbors,
 routes, sockets, connections, protocol state, and a network graph—not HTTP or the
@@ -14,9 +15,10 @@ compute, and data primitives before any application or UI fallback. See the
 [capability direction](docs/capabilities.md).
 The [core structure diagrams](docs/core-architecture.md) show the runtime as UML.
 
-The Rust core has zero third-party crate dependencies. Its bounded JSON reader,
-canonical meaning encoding, local HTTP client, storage, graph, cache, and network
-algorithms use only Rust's standard library and operating-system interfaces.
+The Rust core is standard-library-first. Its bounded JSON reader, canonical
+meaning encoding, storage, graph, cache, and network algorithms use Rust's
+standard library and operating-system interfaces. HTTPS uses the established
+`ureq` and `rustls` crates instead of custom TLS.
 There is no runtime database, ORM, vector database, agent framework, or provider
 SDK. SwiftUI is only the thin macOS window around the Rust process.
 
@@ -29,13 +31,14 @@ Download the Universal macOS DMG from the latest GitHub release, open it, and dr
 nested runtime cannot be altered unnoticed, but it is not Apple-notarized yet.
 On first launch, Control-click Damon and choose **Open** if Gatekeeper asks.
 
-The app is a deliberately small native chat window. It lists the models installed
-in Ollama, remembers your selection, and shows the runtime's real state: processing,
-asking Ollama, thinking, checking meaning, running, verifying, learning, or ready.
-“Thinking” is shown only after Ollama sends thinking data. Type ordinary English and
-Damon replies with structured results from the local runtime. Conversation is
-the interface; internal commands, tool IDs, capability IDs, and semantic graphs
-are never shown. Live memory remains on your Mac under `~/.damon/`.
+The app is a deliberately small native chat window. Enter an OpenCode Zen API key;
+macOS stores it in Keychain while Damon keeps it only in runtime memory. The model
+picker lists supported free Zen models and remembers only the selection. The status
+shows real runtime stages: processing, asking Zen, checking meaning, running,
+verifying, learning, or ready. Type ordinary English and Damon replies with
+structured results from the local runtime. Conversation is the interface; internal
+commands, tool IDs, capability IDs, and semantic graphs are never shown. Live
+memory remains on your Mac under `~/.damon/`.
 
 ### Build from source
 
@@ -91,30 +94,33 @@ Synthetic format/migration fixtures under `tests/fixtures/` are tracked. See the
 limits, migration, and recovery failure modes. Backups are not encrypted and
 must be protected as personal data. Credentials do not belong in the brain.
 
-## Local/free-first inference
+## Deterministic/free-first inference
 
-Routing reuses verified learned graphs and exact known meanings first, then:
+Routing reuses verified learned graphs and exact known meanings first. If language
+is still unknown, exactly one configured teacher is selected:
 
-1. Ollama's local HTTP service (`qwen3:8b` is the initial preference; the macOS
-   picker selects any installed model).
-2. Optional free/local wrapper set by `DAMON_MODEL_COMMAND`.
-3. Optional `DAMON_CLOUD_COMMAND`, only with `DAMON_ALLOW_CLOUD=1`.
+1. OpenCode Zen, after the user supplies `DAMON_OPENCODE_API_KEY` or saves a key
+   from the macOS app. The picker includes only supported free chat models.
+2. Optional local/free wrapper set by `DAMON_MODEL_COMMAND`.
+3. Optional Ollama fallback, enabled explicitly with `DAMON_OLLAMA_MODEL`.
 
-Ollama receives a short prompt plus a dynamically restricted JSON shape over a
-timeout-bounded local socket. Damon streams the response, distinguishes actual
-thinking from waiting, and allows one final repair when a candidate fails validation.
-Reasoning and final-answer limits are tracked separately, so a long bounded thinking
-stream cannot consume the answer budget. Damon also retries older models without
-thinking and with plain JSON when their Ollama runner rejects newer options.
-External commands receive a bounded prompt on stdin and return strict semantic JSON
-on stdout. All providers use the same meaning-only contract and context-local entity
-slots; no model can select a tool, command, application, protocol, or persistent
-entity ID. Provider commands are trusted operator configuration, never model output.
-Invalid graphs fall through to the next route; the whole meaning attempt is bounded.
-Cloud is disabled by default. When enabled,
-`DAMON_CLOUD_CALL_LIMIT` caps attempts per session (default one); a paid wrapper
-must also enforce its provider-specific monetary budget. No provider SDK is
-required. Set `DAMON_OLLAMA_MODEL=''` to skip Ollama.
+The selected teacher receives one short canonical prompt with only relevant meaning
+IDs and context-local entity slots. It cannot select a tool, command, application,
+protocol, or persistent entity ID. Damon parses and validates the answer, with at
+most one semantic repair call. Provider adapters never retry internally. External
+commands receive the bounded prompt on stdin and return strict semantic JSON on
+stdout. Ollama remains timeout- and size-bounded and reports “Thinking” only after
+actual thinking content arrives. Set `DAMON_ZEN_MODEL` or use the picker to choose
+a Zen model; set `DAMON_OLLAMA_MODEL` only when deliberately enabling Ollama.
+
+## Remembered approvals
+
+When an exact action needs an effect outside the current policy, Damon explains the
+missing access. Saying `do it` approves only the pending capability, target,
+canonical arguments, effects, and implementation version. The approval is saved
+before execution and survives restart. A changed path, target, effect, capability,
+or implementation asks again. Say `forget my approvals` to revoke them all. Models
+cannot create approvals, and macOS permissions and missing credentials still apply.
 
 ## Implementation status
 

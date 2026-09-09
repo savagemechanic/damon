@@ -172,6 +172,7 @@ mod tests {
         let action = Action {
             capability: crate::capability::RUN_TESTS,
             tool: crate::tools::TOOL_TEST,
+            implementation_version: 1,
             target: None,
             effects: crate::types::Effects::READ.union(crate::types::Effects::PROCESS),
             args: Vec::new(),

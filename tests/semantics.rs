@@ -160,6 +160,7 @@ fn forged_effects_do_not_bypass_policy() {
     let action = Action {
         capability: damon::capability::RUN_TESTS,
         tool: ToolId(3),
+        implementation_version: 1,
         target: None,
         effects: Effects::NONE,
         args: vec![],

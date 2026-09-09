@@ -11,8 +11,10 @@ cargo clippy --all-targets -- -D warnings
 ```
 
 Use typed IDs, arrays, slices, explicit little-endian records, bounded beams,
-and simple algorithms. The Rust core is standard-library-only: do not add crates.
-Build small bounded Damon-specific readers and structures when needed. Do not
+and simple algorithms. The Rust core is standard-library-first. Established
+protocol and cryptography crates are allowed at explicit trust boundaries; do
+not implement TLS or internet protocol machinery from scratch. Build small
+bounded Damon-specific readers and structures when needed. Do not
 introduce databases, ORMs, agent frameworks, or a parallel workflow subsystem.
 Never raw-dump Rust structures into persistent files. Update format documentation
 and migration tests when adding persistent fields.

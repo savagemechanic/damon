@@ -47,9 +47,12 @@ Delivered milestones:
   the normal capability, policy, execution, and verification path.
 - Native SwiftUI conversation window, private line-delimited runtime protocol,
   Universal 2 application bundle, DMG packaging, and GitHub release automation.
-- Zero-third-party-crate Rust core with a bounded ordered-row JSON reader,
-  native Ollama HTTP streaming, constrained meaning shapes, installed-model
-  selection, one bounded semantic repair, and truthful runtime state events.
+- Standard-library-first Rust core with established `rustls` HTTPS at the cloud
+  boundary, bounded JSON, OpenCode Zen free-model selection, optional Ollama,
+  one bounded semantic repair, and truthful runtime state events.
+- Exact remembered policy approvals bound to capability, effects, entity target,
+  canonical scope bytes, and implementation version; durable revocation and
+  plain-language denial explanations are tested across restart.
 
 Remaining implementation priorities:
 

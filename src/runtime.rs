@@ -21,6 +21,7 @@ pub struct Damon {
 pub enum RuntimeState {
     Processing,
     AskingOllama,
+    AskingCloud,
     Thinking,
     CheckingMeaning,
     Running,
@@ -34,6 +35,7 @@ impl RuntimeState {
         match self {
             Self::Processing => "processing",
             Self::AskingOllama => "asking_ollama",
+            Self::AskingCloud => "asking_cloud",
             Self::Thinking => "thinking",
             Self::CheckingMeaning => "checking_meaning",
             Self::Running => "running",
@@ -49,10 +51,17 @@ impl Damon {
         let path = env::var_os("DAMON_DATA")
             .map(PathBuf::from)
             .unwrap_or_else(default_data_path);
+        Self::open(path)
+    }
+
+    pub fn open(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
+        let data = DamonData::open(path)?;
+        let mut policy = Policy::default();
+        policy.approvals = data.approvals.clone();
         Ok(Self {
-            data: DamonData::open(path)?,
+            data,
             models: ModelRouter::default(),
-            policy: Policy::default(),
+            policy,
         })
     }
 
@@ -72,6 +81,42 @@ impl Damon {
     }
 
     fn handle_inner(&mut self, input: &str, event: &mut impl FnMut(RuntimeState)) -> String {
+        if matches!(
+            crate::language::normalize(input).as_str(),
+            "forget my approvals" | "revoke my approvals" | "clear my approvals"
+        ) {
+            let previous = self.policy.approvals.clone();
+            self.policy.approvals.revoke_all();
+            self.policy.clear_pending();
+            self.data.approvals = self.policy.approvals.clone();
+            return match self.data.save() {
+                Ok(()) => "I revoked every remembered policy approval.".into(),
+                Err(error) => {
+                    self.policy.approvals = previous.clone();
+                    self.data.approvals = previous;
+                    format!("I could not save the revocation, so no approvals changed: {error}")
+                }
+            };
+        }
+        if is_policy_confirmation(input) {
+            let Some(pending) = self.policy.take_pending() else {
+                return "There is no pending action to approve.".into();
+            };
+            let previous = self.policy.approvals.clone();
+            if let Err(error) = self.policy.approve(&pending.action) {
+                return format!("I could not record that approval: {error}");
+            }
+            self.data.approvals = self.policy.approvals.clone();
+            if let Err(error) = self.data.save() {
+                self.policy.approvals = previous.clone();
+                self.data.approvals = previous;
+                return format!(
+                    "I understood your approval but could not save it, so I did not execute the action: {error}"
+                );
+            }
+            return self.handle_inner(&pending.input, event);
+        }
+        self.policy.clear_pending();
         if let Some(response) = conversational_response(input) {
             return response;
         }
@@ -150,6 +195,7 @@ impl Damon {
                 return format!("Deterministic discovery failed: {e}");
             }
             if let Err(e) = self.policy.check(action) {
+                self.policy.remember_pending(action, input);
                 return format!("Policy blocked the plan: {e}");
             }
         }
@@ -323,6 +369,7 @@ impl Damon {
             return Some(format!("Deterministic discovery failed: {error}"));
         }
         if let Err(error) = self.policy.check(action) {
+            self.policy.remember_pending(action, input);
             return Some(format!("Policy blocked the plan: {error}"));
         }
         let started = Instant::now();
@@ -372,6 +419,7 @@ impl Damon {
             |text| validate_teacher_output(input, text, &request, &self.data),
             |model_event| match model_event {
                 crate::model::ModelEvent::AskingOllama => event(RuntimeState::AskingOllama),
+                crate::model::ModelEvent::AskingCloud => event(RuntimeState::AskingCloud),
                 crate::model::ModelEvent::Thinking => event(RuntimeState::Thinking),
                 crate::model::ModelEvent::Processing => event(RuntimeState::Processing),
             },
@@ -390,6 +438,9 @@ impl Damon {
                         |model_event| match model_event {
                             crate::model::ModelEvent::AskingOllama => {
                                 event(RuntimeState::AskingOllama)
+                            }
+                            crate::model::ModelEvent::AskingCloud => {
+                                event(RuntimeState::AskingCloud)
                             }
                             crate::model::ModelEvent::Thinking => event(RuntimeState::Thinking),
                             crate::model::ModelEvent::Processing => event(RuntimeState::Processing),
@@ -468,9 +519,28 @@ fn conversational_response(input: &str) -> Option<String> {
     None
 }
 
+fn is_policy_confirmation(input: &str) -> bool {
+    matches!(
+        crate::language::normalize(input).as_str(),
+        "do it" | "yes do it" | "allow it" | "approve it"
+    )
+}
+
 fn teacher_unavailable(error: &str) -> String {
-    let detail = if !error.contains("Ollama:") {
-        "No Ollama model is currently available. Select a model or enable another language teacher."
+    let detail = if error.contains("No language teacher is configured") {
+        "No language model is configured. Add an OpenCode Zen API key."
+    } else if error.contains("Cloud:") || error.contains("OpenCode Zen") {
+        if error.contains("401") || error.contains("403") {
+            "OpenCode Zen rejected the API key or model access. Replace the key or select an enabled model."
+        } else if error.contains("timed out") || error.contains("connect") {
+            "I couldn't reach OpenCode Zen. Check the network, then retry once."
+        } else if error.contains("too large") {
+            "OpenCode Zen's response exceeded Damon's fixed size bound. Select a less verbose model."
+        } else {
+            "OpenCode Zen answered, but the response was invalid or the meaning failed Damon's checks. Select another model or rephrase the request."
+        }
+    } else if !error.contains("Ollama:") {
+        "No usable language model response was available. Select another configured model."
     } else if error.contains("cannot connect")
         || error.contains("cannot resolve")
         || error.contains("timed out")
@@ -509,4 +579,48 @@ fn default_data_path() -> PathBuf {
         return PathBuf::from(home).join(".damon").join("damon.data");
     }
     PathBuf::from("damon.data")
+}
+
+#[cfg(test)]
+mod policy_confirmation_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_confirmation_executes_and_same_exact_action_never_asks_again() {
+        let directory =
+            std::env::temp_dir().join(format!("damon-policy-confirmation-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir(&directory).unwrap();
+        let mut policy = Policy::default();
+        policy.allowed = crate::types::Effects::READ;
+        let mut damon = Damon {
+            data: DamonData::open(directory.join("brain.data")).unwrap(),
+            models: ModelRouter::default(),
+            policy,
+        };
+
+        let first = damon.handle("what is my default gateway?");
+        assert!(first.contains("process access"));
+        assert!(first.contains("do it"));
+
+        let confirmed = damon.handle("do it");
+        assert!(!confirmed.contains("Policy blocked"));
+        let repeated = damon.handle("what is my default gateway?");
+        assert!(!repeated.contains("Policy blocked"));
+        assert_eq!(damon.data.approvals.grants.len(), 1);
+
+        drop(damon);
+        let mut reopened = Damon::open(directory.join("brain.data")).unwrap();
+        reopened.policy.allowed = crate::types::Effects::READ;
+        let after_restart = reopened.handle("what is my default gateway?");
+        assert!(!after_restart.contains("Policy blocked"));
+        assert_eq!(
+            reopened.handle("forget my approvals"),
+            "I revoked every remembered policy approval."
+        );
+        let after_revocation = reopened.handle("what is my default gateway?");
+        assert!(after_revocation.contains("Policy blocked"));
+        drop(reopened);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }

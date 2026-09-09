@@ -1,6 +1,3 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
 use crate::data::DamonData;
 use crate::graph::{confidence, prune_beam, CandidateGraph};
 use crate::types::{IntentId, MeaningEdge, MeaningGraph};
@@ -34,9 +31,8 @@ pub fn normalize(input: &str) -> String {
 }
 
 pub fn feature_hash(input: &str) -> u64 {
-    let mut h = DefaultHasher::new();
-    normalize(input).hash(&mut h);
-    h.finish()
+    let normalized = normalize(input);
+    crate::cache::hash_bytes(&[normalized.as_bytes()])
 }
 
 fn lexical_evidence(text: &str, intent: IntentId) -> i32 {
@@ -588,5 +584,15 @@ mod tests {
             Interpretation::Ambiguous(_)
         ));
         let _ = std::fs::remove_file(p);
+    }
+
+    #[test]
+    fn persisted_phrase_identity_uses_the_versioned_stable_hash() {
+        let normalized = normalize("  Run   THE tests  ");
+        assert_eq!(normalized, "run the tests");
+        assert_eq!(
+            feature_hash("  Run   THE tests  "),
+            crate::cache::hash_bytes(&[normalized.as_bytes()])
+        );
     }
 }
