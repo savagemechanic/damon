@@ -6,7 +6,8 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-const MAGIC: &[u8; 8] = b"DAMON\0\x07\0";
+const MAGIC: &[u8; 8] = b"DAMON\0\x08\0";
+const SEMANTIC: &[u8; 8] = b"DAMON\0\x07\0";
 const CAPABILITY: &[u8; 8] = b"DAMON\0\x06\0";
 const STRATEGY: &[u8; 8] = b"DAMON\0\x05\0";
 const MEMO: &[u8; 8] = b"DAMON\0\x04\0";
@@ -43,6 +44,7 @@ pub struct DamonData {
     pub strategies: crate::strategy::StrategyTable,
     pub capabilities: crate::capability::CapabilityGraph,
     pub semantic_registry_version: u16,
+    pub network_knowledge: crate::network::topology::Topology,
 }
 
 impl DamonData {
@@ -76,6 +78,7 @@ impl DamonData {
             strategies: crate::strategy::StrategyTable::default(),
             capabilities: crate::capability::CapabilityGraph::default(),
             semantic_registry_version: crate::semantic_registry::VERSION,
+            network_knowledge: crate::network::topology::Topology::default(),
         }
     }
     pub fn generation(&self) -> u64 {
@@ -411,6 +414,7 @@ impl DamonData {
         self.strategies.encode(&mut f)?;
         self.capabilities.encode(&mut f)?;
         write_u16(&mut f, self.semantic_registry_version)?;
+        self.network_knowledge.encode(&mut f)?;
         if f.len() > storage::MAX_IMAGE {
             return Err(storage::invalid("brain image exceeds size limit"));
         }
@@ -420,6 +424,7 @@ impl DamonData {
         let mut r = Reader { bytes, pos: 0 };
         let header = r.take(8)?;
         if header != MAGIC
+            && header != SEMANTIC
             && header != CAPABILITY
             && header != STRATEGY
             && header != MEMO
@@ -471,6 +476,7 @@ impl DamonData {
             });
         }
         if header == MAGIC
+            || header == SEMANTIC
             || header == CAPABILITY
             || header == STRATEGY
             || header == MEMO
@@ -524,6 +530,7 @@ impl DamonData {
             }
         }
         if header == MAGIC
+            || header == SEMANTIC
             || header == CAPABILITY
             || header == STRATEGY
             || header == MEMO
@@ -533,16 +540,21 @@ impl DamonData {
         } else {
             data.world.rebuild(data.entities.len())?;
         }
-        if header == MAGIC || header == CAPABILITY || header == STRATEGY || header == MEMO {
+        if header == MAGIC
+            || header == SEMANTIC
+            || header == CAPABILITY
+            || header == STRATEGY
+            || header == MEMO
+        {
             data.memo = crate::cache::MemoTable::decode(&mut r, &data.entities)?;
         }
-        if header == MAGIC || header == CAPABILITY || header == STRATEGY {
+        if header == MAGIC || header == SEMANTIC || header == CAPABILITY || header == STRATEGY {
             data.strategies = crate::strategy::StrategyTable::decode(&mut r)?;
         }
-        if header == MAGIC || header == CAPABILITY {
+        if header == MAGIC || header == SEMANTIC || header == CAPABILITY {
             data.capabilities = crate::capability::CapabilityGraph::decode(&mut r)?;
         }
-        if header == MAGIC {
+        if header == MAGIC || header == SEMANTIC {
             let stored_registry_version = r.u16()?;
             if stored_registry_version == 0
                 || stored_registry_version > crate::semantic_registry::VERSION
@@ -550,6 +562,9 @@ impl DamonData {
                 return Err(storage::invalid("unsupported semantic registry version"));
             }
             data.semantic_registry_version = crate::semantic_registry::VERSION;
+        }
+        if header == MAGIC {
+            data.network_knowledge = crate::network::topology::Topology::decode(&mut r)?;
         }
         for alias in &data.world.aliases {
             if data
@@ -581,11 +596,25 @@ mod tests {
         let mut d = DamonData::open(&p).unwrap();
         let id = d.add_entity(1, "cpython", "/tmp/cpython");
         d.observe_language(123, IntentId(7), 1, 240);
+        d.network_knowledge
+            .record(
+                crate::network::topology::Identity::Router("192.168.1.1".parse().unwrap()),
+                crate::network::topology::Relation::GatewayFor,
+                crate::network::topology::Identity::Network("192.168.1.0/24".parse().unwrap()),
+                crate::network::topology::Evidence {
+                    provenance: crate::network::topology::Provenance::Learned,
+                    confidence: 230,
+                    first_seen_ms: 10,
+                    last_seen_ms: 20,
+                },
+            )
+            .unwrap();
         d.save().unwrap();
         drop(d);
         let d2 = DamonData::open(&p).unwrap();
         assert_eq!(d2.resolve("cpython"), Some(id));
         assert_eq!(d2.language_candidates(123), &[(IntentId(7), 1)]);
+        assert_eq!(d2.network_knowledge.facts.len(), 1);
         for suffix in ["", ".journal", ".prev", ".lock"] {
             let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
         }
@@ -704,10 +733,11 @@ mod tests {
             .unwrap()
             .effects = crate::types::Effects::READ;
         d.compact().unwrap();
+        let tail_len = network_tail_len(&d);
         drop(d);
         let image = fs::read(&p).unwrap();
         let (generation, payload, _) = storage::unframe(&image).unwrap();
-        let mut old = payload[..payload.len() - 2].to_vec();
+        let mut old = payload[..payload.len() - tail_len].to_vec();
         old[..8].copy_from_slice(CAPABILITY);
         fs::write(&p, storage::frame(generation, &old).unwrap()).unwrap();
 
@@ -739,6 +769,35 @@ mod tests {
         }
     }
 
+    #[test]
+    fn revision_seven_semantic_image_migrates_to_network_knowledge() {
+        let p =
+            std::env::temp_dir().join(format!("damon-v7-migration-{}.data", std::process::id()));
+        for suffix in ["", ".journal", ".prev", ".lock"] {
+            let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
+        }
+        let mut d = DamonData::open(&p).unwrap();
+        d.compact().unwrap();
+        let network_len = network_payload_len(&d);
+        drop(d);
+        let image = fs::read(&p).unwrap();
+        let (generation, payload, _) = storage::unframe(&image).unwrap();
+        let mut old = payload[..payload.len() - network_len].to_vec();
+        old[..8].copy_from_slice(SEMANTIC);
+        fs::write(&p, storage::frame(generation, &old).unwrap()).unwrap();
+
+        let mut migrated = DamonData::open(&p).unwrap();
+        assert!(migrated.network_knowledge.facts.is_empty());
+        migrated.compact().unwrap();
+        drop(migrated);
+        let image = fs::read(&p).unwrap();
+        let (_, payload, _) = storage::unframe(&image).unwrap();
+        assert_eq!(&payload[..8], MAGIC);
+        for suffix in ["", ".journal", ".prev", ".lock"] {
+            let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
+        }
+    }
+
     fn tail_lengths(data: &DamonData) -> (usize, usize, usize) {
         let mut memo = Vec::new();
         data.memo.encode(&mut memo).unwrap();
@@ -746,6 +805,20 @@ mod tests {
         data.strategies.encode(&mut strategy).unwrap();
         let mut capability = Vec::new();
         data.capabilities.encode(&mut capability).unwrap();
-        (memo.len(), strategy.len(), capability.len() + 2)
+        (
+            memo.len(),
+            strategy.len(),
+            capability.len() + network_tail_len(data),
+        )
+    }
+
+    fn network_tail_len(data: &DamonData) -> usize {
+        2 + network_payload_len(data)
+    }
+
+    fn network_payload_len(data: &DamonData) -> usize {
+        let mut network = Vec::new();
+        data.network_knowledge.encode(&mut network).unwrap();
+        network.len()
     }
 }

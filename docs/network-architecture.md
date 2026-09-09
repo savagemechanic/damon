@@ -32,6 +32,9 @@ cryptography.
   default-gateway selection, and native English questions for interfaces/routes;
 - passive Linux ARP and bounded macOS ARP/IPv6 neighbor-table discovery with
   address, MAC, interface, state, evidence source, and observation timestamp;
+- a compact topology graph derived from interface, address, subnet, neighbor,
+  and routing observations, with typed node identities and provenance,
+  confidence, first-seen, and last-seen evidence on every relationship;
 - byte-owned packets whose parsed layers and payload are offsets/views over one
   original buffer;
 - bounded Ethernet dispatch into ARP, IPv4, IPv6, TCP, UDP, and ICMP metadata;
@@ -65,8 +68,9 @@ runtime actions must still declare `NETWORK`, `PROCESS`, `READ`, `WRITE`,
 | Long-lived learned | router identity, host aliases, normal services | compact metadata in `damon.data` |
 
 The brain remains metadata and knowledge, not a packet archive or binary blob
-store. Provenance-aware graph records will distinguish observed, inferred,
-configured, and learned relationships with confidence and freshness.
+store. Raw `Observed` topology facts stay volatile. Only explicitly promoted
+`Inferred`, `Configured`, or `Learned` relationships can enter `damon.data`, and
+the encoder rejects accidental persistence of raw observations.
 
 ## Remaining integration order
 
@@ -74,9 +78,8 @@ configured, and learned relationships with confidence and freshness.
    state where directly available.
 2. Socket/process inventory and owner resolution.
 3. Explicit bounded packet observation behind policy.
-4. Network graph observations and compact selective persistence.
-5. DNS resolution/protocol parsing, DHCP observations, and staged diagnostics.
-6. Expand natural-language route/interface meanings into staged diagnosis.
+4. DNS resolution/protocol parsing, DHCP observations, and staged diagnostics.
+5. Expand natural-language route/interface meanings into staged diagnosis.
 7. TLS metadata, HTTP, SSH, router management, and security as compositions over
    lower layers.
 

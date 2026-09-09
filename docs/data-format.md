@@ -181,3 +181,19 @@ Model-facing entity slots and source spans are request-local and are never store
 as persistent-ID authority. Canonical IR uses deterministic CBOR for hashing and
 interchange; `damon.data` continues to store learned bound graph templates and
 count arrays in its explicit compact schema rather than embedding model JSON.
+
+## Payload revision 8: durable network knowledge
+
+Payload magic `DAMON\0\x08\0` appends a compact network topology after the
+semantic-registry version. It stores at most 16,384 typed node identities and
+65,536 sorted relationship facts. Identities encode machine, interface, address,
+CIDR network, host, router, MAC, and transport-service values directly as
+fixed-width bytes. Facts
+encode compact node indexes, relation and provenance tags, integer confidence,
+and first/last observation times.
+
+The persistence boundary rejects `Observed` facts. Callers must first promote
+verified stable knowledge to `Inferred`, `Configured`, or `Learned`; conversion
+also prunes transient-only nodes. This prevents passive snapshots, socket buffers,
+packet payloads, and current connections from silently becoming history. Revision
+7 remains readable and starts with an empty durable topology before the next save.

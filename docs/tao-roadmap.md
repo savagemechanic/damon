@@ -34,6 +34,9 @@ Delivered milestones:
   remain Damon-owned.
 - Native interface, routing-table, and passive neighbor discovery exposed through
   semantic network questions and verified capabilities on Linux and macOS.
+- Provenance-aware topology derivation across machines, interfaces, addresses,
+  subnets, hosts, MACs, routers, and routes, with compact selective persistence
+  that rejects raw volatile observations.
 
 Remaining implementation priorities:
 
