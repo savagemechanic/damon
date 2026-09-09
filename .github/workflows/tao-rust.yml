@@ -8,10 +8,22 @@ on:
 
 jobs:
   test:
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            rust: stable
+          - os: ubuntu-latest
+            rust: stable
+          - os: ubuntu-latest
+            rust: '1.89.0'
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt, clippy
       - run: cargo fmt --check
       - run: cargo test
       - run: cargo clippy --all-targets -- -D warnings

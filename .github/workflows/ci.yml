@@ -1,4 +1,4 @@
-name: CI
+name: Legacy Python
 
 on:
   push:
@@ -7,6 +7,9 @@ on:
 jobs:
   test:
     runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: legacy/python
     strategy:
       matrix:
         python-version: ["3.12", "3.13"]
