@@ -158,8 +158,7 @@ fn number_before(text: &str, marker: &str) -> Option<u32> {
     let prefix = text.split_once(marker)?.0;
     prefix
         .split(|character: char| !character.is_ascii_digit())
-        .filter(|part| !part.is_empty())
-        .next_back()?
+        .rfind(|part| !part.is_empty())?
         .parse()
         .ok()
 }
