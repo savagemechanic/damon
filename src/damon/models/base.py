@@ -11,3 +11,9 @@ class Model(Protocol):
         messages: list[Message],
         tools: list[dict],
     ) -> ModelResponse: ...
+
+
+class FeedbackAwareModel(Protocol):
+    """Optional model capability for deterministic execution feedback."""
+
+    def record_tool_result(self, *, ok: bool) -> None: ...

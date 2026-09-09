@@ -34,6 +34,9 @@ class Agent:
         self.system_prompt = system_prompt
 
     async def run(self, request: str) -> str:
+        reset_run = getattr(self.model, "reset_run", None)
+        if callable(reset_run):
+            reset_run()
         messages = [Message("system", self.system_prompt), Message("user", request)]
         for step in range(self.max_steps):
             await self.events.emit(Event.make("model.started", {"step": step}))
@@ -50,6 +53,9 @@ class Agent:
             for call in response.tool_calls:
                 await self.events.emit(Event.make("tool.started", {"name": call.name}))
                 result = await self.executor.execute(call.name, call.arguments)
+                record_tool_result = getattr(self.model, "record_tool_result", None)
+                if callable(record_tool_result):
+                    record_tool_result(ok=result.ok)
                 payload = {"ok": result.ok, "output": result.output, "error": result.error}
                 messages.append(
                     Message(

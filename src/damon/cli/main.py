@@ -10,6 +10,7 @@ from pathlib import Path
 
 from damon.core.agent import Agent
 from damon.models.ollama import OllamaModel
+from damon.models.router import ModelCandidate, ModelRouter, ModelTier, RouterPolicy
 from damon.policy.engine import Policy
 from damon.runtime.bootstrap import default_registry
 from damon.runtime.executor import ToolExecutor
@@ -22,7 +23,13 @@ def _parser() -> argparse.ArgumentParser:
 
     ask = sub.add_parser("ask", help="run the coding agent")
     ask.add_argument("request")
-    ask.add_argument("--model", default=os.getenv("DAMON_MODEL", "qwen3:8b"))
+    ask.add_argument("--model", default=os.getenv("DAMON_MODEL", "qwen3:8b"), help="primary Ollama model")
+    ask.add_argument(
+        "--models",
+        default=os.getenv("DAMON_MODELS"),
+        help="comma-separated Ollama escalation chain, cheapest first",
+    )
+    ask.add_argument("--local-only", action="store_true", help="forbid non-local model routes")
     ask.add_argument("--ollama-url", default=os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434"))
 
     sub.add_parser("tools", help="list available native tools")
@@ -41,11 +48,25 @@ def _doctor() -> int:
     return 0
 
 
+def _router(args: argparse.Namespace) -> ModelRouter:
+    names = [name.strip() for name in (args.models or args.model).split(",") if name.strip()]
+    candidates = [
+        ModelCandidate(
+            name=f"ollama:{name}",
+            model=OllamaModel(model=name, base_url=args.ollama_url),
+            tier=ModelTier.LOCAL_SMALL if index == 0 else ModelTier.LOCAL_LARGE,
+            local=True,
+        )
+        for index, name in enumerate(names)
+    ]
+    return ModelRouter(candidates, policy=RouterPolicy(local_only=args.local_only))
+
+
 async def _ask(args: argparse.Namespace) -> int:
     root = args.root.resolve()
     registry = default_registry(root)
     agent = Agent(
-        OllamaModel(model=args.model, base_url=args.ollama_url),
+        _router(args),
         registry,
         ToolExecutor(registry, Policy()),
     )

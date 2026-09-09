@@ -47,6 +47,8 @@ The first implementation includes:
 
 - bounded single-agent execution loop
 - Ollama `/api/chat` provider with tool calling
+- local-first model router with bounded failure-driven escalation
+- routing telemetry for generations, failures, decisions, and escalations
 - automatic JSON schemas from typed Python functions
 - tool registry and executor
 - deterministic policy decisions (`allow`, `ask`, `deny`)
@@ -102,6 +104,14 @@ Override the local model:
 ```bash
 DAMON_MODEL=qwen3:14b damon ask "review this repository"
 ```
+
+Configure a local escalation chain (cheapest/fastest first):
+
+```bash
+DAMON_MODELS=qwen3:8b,qwen3:14b damon ask "fix the failing test"
+```
+
+Damon starts with the first eligible route and escalates only after deterministic evidence such as repeated tool failures or a provider generation failure. Escalation is bounded, monotonic within a run, and can be constrained to local models. Cloud providers will plug into the same router interface later; the agent loop does not need to change.
 
 ## Architecture
 
@@ -176,6 +186,7 @@ This is only the start. A production release still needs stronger sandboxing, ap
 - [x] policy engine
 - [x] SQLite jobs
 - [x] deterministic verification
+- [x] local-first model router with bounded escalation
 - [x] CLI and tests
 - [ ] structured patch/edit planner
 - [ ] automatic test/lint/typecheck discovery
