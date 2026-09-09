@@ -25,6 +25,15 @@ Delivered milestones:
 - Persistent count-based strategy statistics for success, failure, latency, cost,
   model usage, confidence, and risk; deterministic tiered ranking; and runtime
   updates from actual tool exit status and validated teacher execution.
+- Canonical model-independent semantic IR with four node kinds, stable namespaced
+  concepts, bounded request exposure, context-local entity slots, source spans,
+  strict JSON, three-stage validation/binding, DAG composition, deterministic
+  canonical CBOR/hashing, shared producer contract and prompt assets.
+- Structured execution ResultIR and deterministic English rendering; models state
+  meaning only while capability resolution, policy, execution, and verification
+  remain Damon-owned.
+- Native interface and routing-table discovery exposed through semantic network
+  questions and verified capabilities on Linux and macOS.
 
 Remaining implementation priorities:
 
@@ -36,10 +45,10 @@ application automation; accessibility and pixels are escape hatches only. See
 
 1. Populate richer file/tool/procedure/process world records from deterministic
    discovery and extend references from projects to files and operation results.
-2. Expand semantic candidates incrementally across entities and clauses, combine
-   lexical/grammar/context/world evidence, calibrate risk-sensitive thresholds,
-   and support source/destination/modifier/reference/dependency/result semantics.
-   Preserve all constraints or clarify. Cover the full requested example slate.
+2. Expand the canonical semantic registry only from demonstrated needs, improve
+   entity/span resolution and calibrated evidence, and lower currently understood
+   `COPY`/constraint meanings into verified native capabilities. Preserve every
+   constraint or clarify.
 3. Extend memoization from project/test discovery into file inventory and verified
    coding results where external-state fingerprints can prove freshness.
 4. Apply learned rankings to more choice points while preserving hard local-first,

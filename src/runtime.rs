@@ -9,7 +9,7 @@ use crate::learning;
 use crate::model::ModelRouter;
 use crate::policy::Policy;
 use crate::tools;
-use crate::types::{MeaningGraph, ToolResult};
+use crate::types::MeaningGraph;
 
 pub struct Damon {
     pub data: DamonData,
@@ -102,6 +102,7 @@ impl Damon {
             }
             let started = Instant::now();
             let result = tools::execute(action, &self.policy);
+            let structured = crate::result_ir::ResultIr::from_tool(action, &result);
             if let Some(implementation) = self.data.capabilities.resolve_index(action.capability) {
                 if let Err(error) = self
                     .data
@@ -126,7 +127,7 @@ impl Damon {
                 strategy_errors.push(error.to_string());
             }
             outcomes.push(result.success);
-            messages.push(render_result(result));
+            messages.push(structured.render_english());
         }
         let all_succeeded = outcomes.iter().all(|value| *value);
         if let Some((provider, latency_ms)) = teacher {
@@ -225,13 +226,45 @@ impl Damon {
         &self,
         input: &str,
     ) -> Result<(MeaningGraph, crate::model::ProviderKind, u64), String> {
-        let prompt = crate::semantics::teacher_prompt(input, &self.data);
+        let request = crate::semantic_ir::request(input, &self.data);
+        let prompt = crate::semantic_ir::prompt(&request, false);
         let started = Instant::now();
         let response = self.models.infer_validated(&prompt, |text| {
-            crate::semantics::parse_teacher(text, &self.data)
-                .and_then(|m| crate::semantics::validate_request(input, &m, &self.data))
+            use crate::semantic_ir::SemanticProducer;
+            let resolution =
+                crate::semantic_ir::JsonSemanticProducer { output: text }.resolve(&request);
+            if let Some(error) = resolution.diagnostic.as_deref() {
+                return Err(error.to_string());
+            }
+            if resolution.status != crate::semantic_ir::ResolutionStatus::Resolved {
+                return Err("teacher did not produce exactly one unambiguous candidate".into());
+            }
+            let meaning = crate::semantic_ir::bind(
+                &resolution.candidates[0].ir,
+                &request,
+                &self.data,
+                crate::semantic_ir::computed_confidence(&resolution, 0),
+            )?;
+            crate::semantics::validate_request(input, &meaning, &self.data)
         })?;
-        let meaning = crate::semantics::parse_teacher(&response.text, &self.data)?;
+        use crate::semantic_ir::SemanticProducer;
+        let resolution = crate::semantic_ir::JsonSemanticProducer {
+            output: &response.text,
+        }
+        .resolve(&request);
+        if let Some(error) = resolution.diagnostic.as_deref() {
+            return Err(error.to_string());
+        }
+        let meaning = crate::semantic_ir::bind(
+            &resolution
+                .candidates
+                .first()
+                .ok_or("teacher returned no semantic candidate")?
+                .ir,
+            &request,
+            &self.data,
+            crate::semantic_ir::computed_confidence(&resolution, 0),
+        )?;
         Ok((
             meaning,
             response.provider,
@@ -255,29 +288,6 @@ fn action_risk(effects: crate::types::Effects) -> u8 {
         10
     } else {
         1
-    }
-}
-
-fn render_result(result: ToolResult) -> String {
-    let out = result.stdout.trim();
-    let err = result.stderr.trim();
-    if result.success {
-        if out.is_empty() {
-            "Done. The operation completed successfully.".into()
-        } else {
-            out.to_string()
-        }
-    } else if !err.is_empty() {
-        format!(
-            "The operation failed{}: {}",
-            result
-                .code
-                .map(|c| format!(" with exit code {c}"))
-                .unwrap_or_default(),
-            err
-        )
-    } else {
-        "The operation failed.".into()
     }
 }
 

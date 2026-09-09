@@ -1,0 +1,8 @@
+Convert the request to Damon IR.
+Meaning only; no tools or execution.
+Use only supplied IDs/slots. Invent nothing.
+Return valid schema only. Max 3 candidates.
+Request: {input}
+Entities: {entities}
+Concepts: {concepts}
+Context: {context}

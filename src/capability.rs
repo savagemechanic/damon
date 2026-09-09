@@ -227,6 +227,44 @@ impl CapabilityGraph {
         self.resolve(id)?.tool
     }
 
+    pub(crate) fn reconcile_builtins(&mut self) -> io::Result<()> {
+        for (capability, tool, effects) in [
+            (INSPECT_INTERFACES, ToolId(6), Effects::READ),
+            (
+                INSPECT_ROUTES,
+                ToolId(7),
+                Effects::READ.union(Effects::PROCESS),
+            ),
+        ] {
+            let row = self
+                .capabilities
+                .iter_mut()
+                .find(|row| row.id == capability)
+                .ok_or_else(|| storage::invalid("missing built-in capability"))?;
+            row.effects = effects;
+            row.version = row.version.max(2);
+            if !self.implementations.iter().any(|implementation| {
+                implementation.capability == capability
+                    && implementation.kind == ImplementationKind::Native
+                    && implementation.tool == Some(tool)
+                    && implementation.verification == Verification::Verified
+            }) {
+                self.add_implementation(
+                    NewImplementation {
+                        capability,
+                        kind: ImplementationKind::Native,
+                        tool: Some(tool),
+                        procedure: None,
+                        verification: Verification::Verified,
+                        provenance: Provenance::BuiltIn,
+                    },
+                    &[],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn add_implementation(
         &mut self,
         draft: NewImplementation,

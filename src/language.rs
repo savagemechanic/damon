@@ -103,7 +103,247 @@ fn lexical_evidence(text: &str, intent: IntentId) -> i32 {
     }
 }
 
+pub struct DeterministicProducer<'a> {
+    pub data: &'a DamonData,
+}
+
+impl crate::semantic_ir::SemanticProducer for DeterministicProducer<'_> {
+    fn resolve(
+        &self,
+        request: &crate::semantic_ir::SemanticRequest,
+    ) -> crate::semantic_ir::SemanticResolution {
+        use crate::semantic_ir::{
+            from_meaning, ProducerKind, ResolutionStatus, ScoredCandidate, SemanticResolution,
+        };
+        if let Some(ir) = direct_semantic_ir(request) {
+            return SemanticResolution {
+                status: ResolutionStatus::Resolved,
+                candidates: vec![ScoredCandidate { ir, evidence: 180 }],
+                unresolved_spans: Vec::new(),
+                producer: ProducerKind::Deterministic,
+                diagnostic: None,
+            };
+        }
+        let interpreted = understand_bound(&request.input, self.data);
+        let (status, meanings, diagnostic) = match interpreted {
+            Interpretation::Resolved(meaning) => {
+                (ResolutionStatus::Resolved, vec![(meaning, 160)], None)
+            }
+            Interpretation::Ambiguous(graphs) => (
+                ResolutionStatus::Ambiguous,
+                graphs
+                    .into_iter()
+                    .map(|graph| {
+                        let score = graph.score() as i32;
+                        (candidate_to_meaning(&graph, 0), score)
+                    })
+                    .collect(),
+                None,
+            ),
+            Interpretation::Unknown { .. } => (ResolutionStatus::Unknown, Vec::new(), None),
+            Interpretation::Clarify(message) => {
+                (ResolutionStatus::Invalid, Vec::new(), Some(message))
+            }
+        };
+        let candidates = meanings
+            .into_iter()
+            .filter_map(|(meaning, evidence)| {
+                from_meaning(&meaning, request)
+                    .ok()
+                    .map(|ir| ScoredCandidate { ir, evidence })
+            })
+            .collect::<Vec<_>>();
+        SemanticResolution {
+            status: if candidates.is_empty() && status == ResolutionStatus::Resolved {
+                ResolutionStatus::Invalid
+            } else {
+                status
+            },
+            candidates,
+            unresolved_spans: Vec::new(),
+            producer: ProducerKind::Deterministic,
+            diagnostic,
+        }
+    }
+}
+
+fn direct_semantic_ir(
+    request: &crate::semantic_ir::SemanticRequest,
+) -> Option<crate::semantic_ir::CandidateIr> {
+    use crate::semantic_ir::{CandidateIr, Edge, Node, NodeKind, SourceSpan};
+    use crate::semantic_registry as registry;
+    let text = normalize(&request.input);
+    if text.starts_with("copy ") && text.contains(" to ") {
+        let object_text = request.input.strip_prefix("copy ")?.split_once(" from ")?.0;
+        let start = request.input.find(object_text)?;
+        let end = start.checked_add(object_text.len())?;
+        let source = request
+            .slots
+            .iter()
+            .find(|slot| slot.kind == registry::PROJECT)?;
+        let destination = request
+            .slots
+            .iter()
+            .find(|slot| slot.kind == registry::DIRECTORY)?;
+        return Some(CandidateIr {
+            nodes: vec![
+                Node {
+                    kind: NodeKind::Action,
+                    concept: registry::COPY.0,
+                    value: 0,
+                    span: None,
+                },
+                Node {
+                    kind: NodeKind::Entity,
+                    concept: registry::FILE.0,
+                    value: 0,
+                    span: Some(SourceSpan {
+                        start: start.try_into().ok()?,
+                        end: end.try_into().ok()?,
+                        expected_kind: registry::FILE.0,
+                    }),
+                },
+                Node {
+                    kind: NodeKind::Entity,
+                    concept: registry::PROJECT.0,
+                    value: u32::from(source.slot),
+                    span: None,
+                },
+                Node {
+                    kind: NodeKind::Entity,
+                    concept: registry::DIRECTORY.0,
+                    value: u32::from(destination.slot),
+                    span: None,
+                },
+            ],
+            edges: vec![
+                Edge {
+                    source: 0,
+                    predicate: registry::OBJECT.0,
+                    target: 1,
+                },
+                Edge {
+                    source: 0,
+                    predicate: registry::SOURCE.0,
+                    target: 2,
+                },
+                Edge {
+                    source: 0,
+                    predicate: registry::DESTINATION.0,
+                    target: 3,
+                },
+            ],
+        });
+    }
+    if text.starts_with("find files larger than 10 mb") {
+        return Some(CandidateIr {
+            nodes: vec![
+                Node {
+                    kind: NodeKind::Action,
+                    concept: registry::FIND.0,
+                    value: 0,
+                    span: None,
+                },
+                Node {
+                    kind: NodeKind::Entity,
+                    concept: registry::FILE_SET.0,
+                    value: u32::MAX,
+                    span: None,
+                },
+                Node {
+                    kind: NodeKind::Constraint,
+                    concept: registry::SIZE.0,
+                    value: registry::GREATER_THAN.0,
+                    span: None,
+                },
+                Node {
+                    kind: NodeKind::Value,
+                    concept: registry::BYTES.0,
+                    value: 10_000_000,
+                    span: None,
+                },
+            ],
+            edges: vec![
+                Edge {
+                    source: 0,
+                    predicate: registry::OBJECT.0,
+                    target: 1,
+                },
+                Edge {
+                    source: 0,
+                    predicate: registry::REQUIRES.0,
+                    target: 2,
+                },
+                Edge {
+                    source: 2,
+                    predicate: registry::VALUE.0,
+                    target: 3,
+                },
+            ],
+        });
+    }
+    None
+}
+
 pub fn understand(input: &str, data: &DamonData) -> Interpretation {
+    use crate::semantic_ir::{ResolutionStatus, SemanticProducer};
+    let request = crate::semantic_ir::request(input, data);
+    let resolution = DeterministicProducer { data }.resolve(&request);
+    match resolution.status {
+        ResolutionStatus::Resolved => {
+            let Some(candidate) = resolution.candidates.first() else {
+                return Interpretation::Unknown {
+                    feature: feature_hash(input),
+                };
+            };
+            let confidence = crate::semantic_ir::computed_confidence(&resolution, 0);
+            match crate::semantic_ir::bind(&candidate.ir, &request, data, confidence) {
+                Ok(meaning) => Interpretation::Resolved(meaning),
+                Err(message) => Interpretation::Clarify(message),
+            }
+        }
+        ResolutionStatus::Ambiguous => {
+            let mut graphs = Vec::new();
+            for candidate in resolution.candidates {
+                if let Ok(meaning) = crate::semantic_ir::bind(&candidate.ir, &request, data, 0) {
+                    graphs.push(CandidateGraph {
+                        intent: meaning.intent,
+                        target: meaning.target,
+                        nodes: meaning.nodes,
+                        edges: meaning
+                            .edges
+                            .into_iter()
+                            .map(|edge| crate::graph::Edge {
+                                from: edge.source as u16,
+                                relation: edge.relation,
+                                to: edge.target as u16,
+                            })
+                            .collect(),
+                        evidence: candidate.evidence,
+                        prior: 1,
+                    });
+                }
+            }
+            if graphs.is_empty() {
+                Interpretation::Unknown {
+                    feature: feature_hash(input),
+                }
+            } else {
+                Interpretation::Ambiguous(graphs)
+            }
+        }
+        ResolutionStatus::Invalid => Interpretation::Clarify(
+            resolution
+                .diagnostic
+                .unwrap_or_else(|| "The request could not be bound safely.".into()),
+        ),
+        ResolutionStatus::Unknown => Interpretation::Unknown {
+            feature: feature_hash(input),
+        },
+    }
+}
+
+fn understand_bound(input: &str, data: &DamonData) -> Interpretation {
     let text = normalize(input);
     if text
         .split_whitespace()

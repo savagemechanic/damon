@@ -1,62 +1,85 @@
-# Semantic graphs and execution
+# Canonical semantic interface v1
 
-English normalization produces a bounded beam (width four) of compact candidate
-node/edge arrays. Integer lexical scores combine with log-count priors; margins
-select confident candidates. This is a small count-based approximation, not a
-calibrated universal English parser. Two-clause grammar patterns preserve
-sequence and conditional edges without enumerating all parses.
-
-Current executable actions are Git status, actual Git diff, discovered tests,
-file listing, and files in yesterday's commits attributed to the configured Git
-user email. Uncommitted edit dates cannot be reconstructed from Git. Graph nodes
-represent actions, project entities, object concepts, and yesterday. Relations
-include target, object, time, dependency, and success condition. The relation
-vocabulary also reserves source, destination, reference, modifier, result, and
-action; unsupported executable uses are rejected, never silently ignored.
+The stable boundary is: **models produce meaning; Damon produces execution**.
+Every semantic producer receives the same bounded `SemanticRequest` and returns a
+`SemanticResolution`. The deterministic rule engine, verified learned mappings,
+Ollama, external free models, and optional cloud models do not select tools,
+commands, libraries, protocols, applications, effects, or policy.
 
 ```text
-run the tests in Damon
-show me what changed
-show me the files I changed yesterday
-run the tests and if they pass show me the diff
+English -> candidate IR -> validate -> bind -> rank -> canonical meaning
+        -> capability -> plan -> policy -> execute -> ResultIR -> English
 ```
 
-The planner validates the entire graph, translates each action using registered
-tool metadata, and checks policy for the whole plan before execution. Conditional
-steps run only when their prerequisite actually succeeds. Tool effects are
-recomputed by policy, so a fabricated low-effect action cannot bypass it.
+## Meaning-only IR
 
-The teacher returns strict node and edge lines, never shell commands or prose:
+IR version 1 has four node kinds: `ACTION`, `ENTITY`, `VALUE`, and `CONSTRAINT`.
+Graphs are bounded arrays of at most 32 nodes and 64 typed edges; a response has
+at most three candidates. The stable registry reserves high-byte namespaces:
+
+| Prefix | Namespace |
+| --- | --- |
+| `0x01` | action |
+| `0x02` | predicate |
+| `0x03` | property |
+| `0x04` | entity kind |
+| `0x05` | operator |
+| `0x06` | value type |
+
+Registry version 1 includes coding and network meanings plus `COPY`, `FIND`,
+`TARGET`, `OBJECT`, `SOURCE`, `DESTINATION`, `TIME`, `AFTER`, `ON_SUCCESS`,
+`ON_FAILURE`, `REQUIRES`, size/greater-than, bytes, and the required entity
+kinds. IDs are permanent; names are metadata.
+
+Models see context-local slots such as `0 Damon` or `1 CPython`, never persistent
+entity IDs. Unknown user text is represented by validated UTF-8 byte spans into
+the original request. Thus `parser.rs` can be bound from the user's exact text,
+but a model cannot invent a path, host, credential, command, or tool argument.
+Abstract semantic entities such as a file set are registry concepts, not strings.
+
+Structural validation checks versions, bounds, node kinds, indexes, duplicate or
+self edges, strict JSON fields, and source spans. Semantic validation checks the
+exposed concept subset, action arguments, entity-kind compatibility, constraint
+types, and the small acyclic composition vocabulary. Only `AFTER`, `ON_SUCCESS`,
+`ON_FAILURE`, and `REQUIRES` compose v1 graphs. There are no loops, jumps, eval,
+shell, tool calls, threads, or exception handlers in model-facing IR.
+
+## Producer contract and prompts
+
+Prompt assembly selects only relevant actions, predicates, entity kinds, slots,
+focus, and previous action. All providers share the checked-in templates at
+`prompts/semantic-ir-v1.txt` and `prompts/semantic-ir-v1-compact.txt`. The full
+template carries the strict JSON shape for providers without schema enforcement;
+the compact template is intended for constrained local decoding. Unknown fields,
+invented concepts, invented slots, invalid spans, and unsupported meanings fail
+closed. Invalid output may fall through once to the next configured provider;
+there is no unbounded repair loop.
+
+Models do not supply confidence. Damon scores schema validity, bound-entity
+quality, conversation context, learned counts, and candidate margin with integers.
+Multiple candidates remain `AMBIGUOUS` unless evidence establishes a sufficient
+margin. Confidence and policy authorization are independent.
+
+## Canonical bytes, learning, and execution
+
+Validated candidate IR serializes deterministically as canonical CBOR arrays:
 
 ```text
-N action 3
-N entity 0
-N action 2
-E 0 target 1
-E 2 target 1
-E 2 condition 0
+[ir_version, registry_version, nodes, edges]
 ```
 
-This graph runs tests for project zero and runs its diff only on success. Teacher
-output is capped at 8 KiB, 32 nodes, and 64 edges. Unknown actions/entities,
-invalid endpoints, duplicate edges, cycles/forward dependencies, incompatible
-objects, and unsupported relations are rejected. Explicit temporal/conditional
-constraints are checked against the request. Negations and unsupported time
-constraints currently require clarification rather than an approximation.
-An invalid answer falls through to the next enabled provider.
+Map ordering cannot affect the bytes. Decoding rejects non-canonical integers,
+trailing data, version mismatches, unknown concepts, invalid slots, and malformed
+graphs. Stable FNV-1a hashing supports cache keys and deduplication.
 
-Only verified successful execution retains an exact phrase's entire graph in
-`damon.data`. A repeated learned composite preserves all steps and dependencies;
-it is never reduced to its first intent. Failed execution removes that exact
-graph. At most 4,096 graphs are retained. Reuse still validates the graph and
-passes through the same planner/policy/tool path. Tests prove reuse with model
-providers disabled and graph persistence across reopening the brain.
+After context binding, executable meanings lower to capability IDs. Capability
+resolution chooses a verified native/composed/system/protocol implementation;
+policy recomputes effects before execution. A semantic producer cannot grant a
+capability or select its implementation. Successful verified execution feeds
+phrase/action counts and exact graph reuse; failures remove the exact learned
+mapping.
 
-Project context resolves it/that/this/its/they/there against the current focus;
-missing context requires clarification. "Same thing" reuses the previous verified
-graph, preserving all steps and conditions while changing a single project binding.
-A prior multi-project procedure requires explicit targets. Unqualified learned
-requests follow current focus; explicitly named targets keep their bindings.
-The second clause inherits the first clause's target unless it names another.
-File copy/edit semantics, learned instruction procedures, and dependency-aware
-cached discovery remain subsequent milestones.
+Execution first produces `ResultIr`: status, observations, changes, checks,
+artifacts, and diagnostics. Routine facts render deterministically—for example,
+84 passed and zero failed becomes “All 84 tests passed.” A future explanatory
+model may receive those facts, but cannot change them.

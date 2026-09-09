@@ -246,7 +246,9 @@ fn teacher_answers_are_not_learned_when_execution_fails() {
     let f = Fixture::new();
     let mut models = damon::model::ModelRouter::default();
     models.ollama_model.clear();
-    models.external_command = Some("printf 'N action 1\\nN entity 0\\nE 0 target 1\\n'".into());
+    models.external_command = Some(
+        "printf '%s' '{\"ir_version\":1,\"registry_version\":1,\"candidates\":[{\"nodes\":[{\"kind\":\"ACTION\",\"concept\":16777220,\"value\":0},{\"kind\":\"ENTITY\",\"concept\":67108865,\"value\":0}],\"edges\":[{\"source\":0,\"predicate\":33554433,\"target\":1}]}],\"unresolved_spans\":[]}'".into(),
+    );
     models.allow_cloud = false;
     let mut data = DamonData::open(f.path()).unwrap();
     data.entities[0].value = f.0.join("not-a-repository").to_string_lossy().into_owned();

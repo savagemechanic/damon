@@ -8,6 +8,8 @@ pub struct ToolId(pub u32);
 pub struct ProcedureId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CapabilityId(pub u32);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ConceptId(pub u32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Effects(pub u32);

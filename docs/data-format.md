@@ -165,3 +165,17 @@ external interfaces, application references, accessibility, and pixels. This
 ranking does not bypass effects policy or execution verification. Revision-5
 strategy payloads remain readable and receive the canonical built-in capability
 graph on migration.
+
+## Payload revision 7: semantic registry contract
+
+Payload magic `DAMON\0\x07\0` appends a u16 semantic-registry version after the
+capability graph. The logical semantic IR is independent of this physical brain
+layout; memory retains the registry version so learned mappings cannot silently
+change meaning. Revision 6 remains readable. On migration Damon restores missing
+built-in local-host/Desktop entities and verified native interface/route
+implementations, then writes revision 7 on the next save or compaction.
+
+Model-facing entity slots and source spans are request-local and are never stored
+as persistent-ID authority. Canonical IR uses deterministic CBOR for hashing and
+interchange; `damon.data` continues to store learned bound graph templates and
+count arrays in its explicit compact schema rather than embedding model JSON.

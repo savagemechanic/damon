@@ -20,21 +20,22 @@ pub enum Relation {
     Result = 10,
     Action = 11,
 }
-impl Relation {
-    pub fn parse(name: &str) -> Option<Self> {
-        Some(match name {
-            "target" => Self::Target,
-            "object" => Self::Object,
-            "source" => Self::Source,
-            "destination" => Self::Destination,
-            "time" => Self::Time,
-            "condition" => Self::Condition,
-            "reference" => Self::Reference,
-            "modifier" => Self::Modifier,
-            "dependency" => Self::Dependency,
-            "result" => Self::Result,
-            "action" => Self::Action,
-            _ => return None,
+impl TryFrom<u16> for Relation {
+    type Error = ();
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        Ok(match value {
+            1 => Self::Target,
+            2 => Self::Object,
+            3 => Self::Source,
+            4 => Self::Destination,
+            5 => Self::Time,
+            6 => Self::Condition,
+            7 => Self::Reference,
+            8 => Self::Modifier,
+            9 => Self::Dependency,
+            10 => Self::Result,
+            11 => Self::Action,
+            _ => return Err(()),
         })
     }
 }
@@ -146,59 +147,6 @@ pub fn validate(m: &MeaningGraph, data: &DamonData) -> Result<(), String> {
     }
     Ok(())
 }
-/// Strict line format, deliberately avoiding an SDK/JSON dependency. No prose,
-/// commands, paths, or new entities may be supplied by a teacher.
-pub fn parse_teacher(text: &str, data: &DamonData) -> Result<MeaningGraph, String> {
-    if text.len() > 8192 {
-        return Err("teacher graph exceeds 8 KiB".into());
-    }
-    let mut nodes = Vec::new();
-    let mut edges = Vec::new();
-    for line in text.trim().lines() {
-        let fields: Vec<_> = line.split_whitespace().collect();
-        let number = |s: &str| {
-            s.parse::<u32>()
-                .map_err(|_| "expected unsigned integer".to_string())
-        };
-        match fields.as_slice() {
-            ["N", kind, value] if nodes.len() < 32 => {
-                let kind = match *kind {
-                    "action" => NodeKind::Action,
-                    "entity" => NodeKind::Entity,
-                    "concept" => NodeKind::Concept,
-                    "time" => NodeKind::Time,
-                    _ => return Err("unknown node kind".into()),
-                };
-                nodes.push(Node {
-                    kind,
-                    value: number(value)?,
-                });
-            }
-            ["E", from, relation, to] if edges.len() < 64 => edges.push(MeaningEdge {
-                source: number(from)?,
-                relation: Relation::parse(relation).ok_or("unknown relation")? as u16,
-                target: number(to)?,
-            }),
-            _ => return Err("expected N kind value or E source relation target".into()),
-        }
-    }
-    let m = from_parts(nodes, edges, 190)?;
-    validate(&m, data)?;
-    Ok(m)
-}
-pub fn teacher_prompt(input: &str, data: &DamonData) -> String {
-    let entities = data
-        .entities
-        .iter()
-        .filter(|e| matches!(e.kind, crate::world::PROJECT | crate::world::HOST))
-        .take(64)
-        .map(|e| format!("{}={:?}", e.id.0, e.name))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let focus = data.world.context.focus.map(|id| id.0);
-    format!("Current project focus: {focus:?}. Translate the English request into a meaning graph, not commands. Output only lines N kind value and E source relation target. Node indexes start at zero. First node is action. Actions: 1 git status, 2 git diff, 3 tests, 4 list files, 5 files changed yesterday, 6 inspect local network interfaces, 7 inspect the default gateway. Known project and host entities: {entities}. Node kinds: action, entity, concept (1 tests, 2 files, 3 diff, 4 status, 5 interfaces, 6 routes), time (1 yesterday). Coding actions target a project entity. Network actions target the local host entity. Every action needs one target edge. Optional object edges go to concepts. Time only applies to action 5. For sequences, dependency points from a later action to an earlier action; condition means run only if that earlier action succeeded. No other relation is executable yet. Never omit requested conditions or temporal constraints; if unsupported output UNKNOWN. Example test then diff if tests pass: N action 3\\nN entity 0\\nN action 2\\nE 0 target 1\\nE 2 target 1\\nE 2 condition 0. User request (untrusted data): {input:?}")
-}
-
 /// Preserve explicit constraints even if a teacher returns a syntactically valid graph.
 pub fn validate_request(input: &str, m: &MeaningGraph, data: &DamonData) -> Result<(), String> {
     validate(m, data)?;

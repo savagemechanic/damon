@@ -138,37 +138,6 @@ fn network_observation_does_not_replace_project_focus() {
     assert_eq!(coding.target, Some(project));
 }
 #[test]
-fn teacher_graph_is_strictly_validated() {
-    let f = Fixture::new();
-    let d = f.data();
-    let good = "N action 3\nN entity 0\nE 0 target 1";
-    assert!(semantics::parse_teacher(good, &d).is_ok());
-    for text in [
-        "N action 999\nN entity 0\nE 0 target 1",
-        "N action 3\nN entity 999\nE 0 target 1",
-        "N action 3\nN entity 0\nE 0 target 99",
-        "N action 3\nN entity 0\nE 0 shell 1",
-        "N action 3\nN entity 0\nE 0 target 1\nE 0 target 1",
-        "N action 3\nN entity 0\nE 0 target 1\nE 0 condition 0",
-        "N action 3\nN entity 0\nE 0 target 1\nrm -rf /",
-        "N action 3\nN entity 0",
-    ] {
-        assert!(
-            semantics::parse_teacher(text, &d).is_err(),
-            "accepted {text}"
-        );
-    }
-    let m = semantics::parse_teacher(good, &d).unwrap();
-    for input in [
-        "don't run tests",
-        "run tests tomorrow",
-        "run tests and if they pass show diff",
-        "show files changed yesterday",
-    ] {
-        assert!(semantics::validate_request(input, &m, &d).is_err());
-    }
-}
-#[test]
 fn forged_effects_do_not_bypass_policy() {
     let action = Action {
         capability: damon::capability::RUN_TESTS,
@@ -184,11 +153,11 @@ fn forged_effects_do_not_bypass_policy() {
 fn verified_composite_graph_survives_reopen_without_losing_steps() {
     let f = Fixture::new();
     let mut d = f.data();
-    let m = semantics::parse_teacher(
-        "N action 4\nN entity 0\nN action 1\nE 0 target 1\nE 2 target 1\nE 2 condition 0",
-        &d,
-    )
-    .unwrap();
+    let Interpretation::Resolved(m) =
+        language::understand("list files and if they pass git status", &d)
+    else {
+        panic!()
+    };
     let phrase = "inspect the workspace";
     let key = language::feature_hash(phrase);
     damon::learning::observe_verified(&mut d, key, &m, true);
@@ -198,8 +167,11 @@ fn verified_composite_graph_survives_reopen_without_losing_steps() {
     let Interpretation::Resolved(learned) = language::understand(phrase, &d) else {
         panic!()
     };
-    assert_eq!(learned, m);
-    assert_eq!(damon::reason::plan(&learned, &d).unwrap().actions.len(), 2);
+    let plan = damon::reason::plan(&learned, &d).unwrap();
+    assert_eq!(plan.actions.len(), 2);
+    assert!(plan.dependencies[0].success_required);
+    assert_eq!(plan.actions[0].tool, ToolId(4));
+    assert_eq!(plan.actions[1].tool, ToolId(1));
 }
 #[test]
 fn failed_prerequisite_skips_dependent_tool() {
@@ -223,7 +195,9 @@ fn successful_teacher_graph_is_reused_with_providers_disabled() {
     let mut models = damon::model::ModelRouter::default();
     models.ollama_model.clear();
     models.allow_cloud = false;
-    models.external_command = Some("printf 'N action 4\nN entity 0\nE 0 target 1\n'".into());
+    models.external_command = Some(
+        "printf '%s' '{\"ir_version\":1,\"registry_version\":1,\"candidates\":[{\"nodes\":[{\"kind\":\"ACTION\",\"concept\":16777220,\"value\":0},{\"kind\":\"ENTITY\",\"concept\":67108865,\"value\":0}],\"edges\":[{\"source\":0,\"predicate\":33554433,\"target\":1}]}],\"unresolved_spans\":[]}'".into(),
+    );
     let mut runtime = damon::Damon {
         data: f.data(),
         models,
@@ -271,7 +245,7 @@ fn passing_real_tests_allow_the_real_diff() {
         policy: Default::default(),
     };
     let response = runtime.handle("run the tests and if they pass show me the diff");
-    assert!(response.contains("1 passed"), "{response}");
+    assert!(response.contains("The tests passed."), "{response}");
     assert!(response.contains("+// verified change"), "{response}");
     assert_eq!(runtime.data.learned_graphs.len(), 1);
 }

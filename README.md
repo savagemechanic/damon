@@ -13,7 +13,8 @@ compute, and data primitives before any application or UI fallback. See the
 [capability direction](docs/capabilities.md).
 
 There is no runtime database, ORM, vector database, agent framework, or provider
-SDK. The kernel currently has no third-party Rust dependencies.
+SDK. Serde provides strict, well-tested model-facing JSON decoding; Damon's
+canonical compact semantic encoding remains a small deterministic implementation.
 
 ## Run locally
 
@@ -77,8 +78,10 @@ Routing tries deterministic or verified learned graphs first, then:
 2. Optional free/local wrapper set by `DAMON_MODEL_COMMAND`.
 3. Optional `DAMON_CLOUD_COMMAND`, only with `DAMON_ALLOW_CLOUD=1`.
 
-Commands receive a compact prompt on stdin and return a structured graph on
-stdout. Provider commands are trusted operator configuration, never model output.
+Commands receive a bounded prompt on stdin and return strict semantic JSON on
+stdout. All providers use the same meaning-only contract and context-local entity
+slots; no model can select a tool, command, application, protocol, or persistent
+entity ID. Provider commands are trusted operator configuration, never model output.
 Each enabled route is attempted once, with a 30-second timeout. Invalid graphs
 fall through to the next route. Cloud is disabled by default. When enabled,
 `DAMON_CLOUD_CALL_LIMIT` caps attempts per session (default one); a paid wrapper
@@ -87,8 +90,9 @@ required. Set `DAMON_OLLAMA_MODEL=''` to skip Ollama.
 
 ## Implementation status
 
-The tested kernel has recoverable binary memory, bounded candidate graphs,
-validated teacher graphs, conditional plans, exact-graph learning/reuse,
+The tested kernel has recoverable binary memory, a stable namespaced semantic
+registry, strict bounded candidate IR, deterministic canonical CBOR, context-slot
+binding, conditional plans, structured ResultIR, exact-graph learning/reuse,
 dependency-aware cached discovery, reusable verification plans, policy checks,
 bounded subprocess lifetimes, compact learned strategy statistics, and basic
 coding inspection/testing.

@@ -18,6 +18,8 @@ mod storage;
 
 mod process;
 
+pub mod semantic_ir;
+pub mod semantic_registry;
 pub mod semantics;
 pub mod strategy;
 
@@ -27,3 +29,4 @@ pub mod world;
 mod world_commands;
 
 pub mod reference;
+pub mod result_ir;

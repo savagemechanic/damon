@@ -6,7 +6,8 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-const MAGIC: &[u8; 8] = b"DAMON\0\x06\0";
+const MAGIC: &[u8; 8] = b"DAMON\0\x07\0";
+const CAPABILITY: &[u8; 8] = b"DAMON\0\x06\0";
 const STRATEGY: &[u8; 8] = b"DAMON\0\x05\0";
 const MEMO: &[u8; 8] = b"DAMON\0\x04\0";
 const WORLD: &[u8; 8] = b"DAMON\0\x03\0";
@@ -41,6 +42,7 @@ pub struct DamonData {
     pub memo: crate::cache::MemoTable,
     pub strategies: crate::strategy::StrategyTable,
     pub capabilities: crate::capability::CapabilityGraph,
+    pub semantic_registry_version: u16,
 }
 
 impl DamonData {
@@ -55,6 +57,9 @@ impl DamonData {
         if fresh {
             data.seed()?;
             data.save()?;
+        } else {
+            data.ensure_system_entities()?;
+            data.capabilities.reconcile_builtins()?;
         }
         Ok(data)
     }
@@ -70,6 +75,7 @@ impl DamonData {
             memo: crate::cache::MemoTable::default(),
             strategies: crate::strategy::StrategyTable::default(),
             capabilities: crate::capability::CapabilityGraph::default(),
+            semantic_registry_version: crate::semantic_registry::VERSION,
         }
     }
     pub fn generation(&self) -> u64 {
@@ -88,6 +94,18 @@ impl DamonData {
         );
         let host = self.add_entity(crate::world::HOST, "local host", "");
         self.link(EntityId(0), crate::world::Relationship::RunsOn, host)?;
+        let desktop_path = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| cwd.clone())
+            .join("Desktop");
+        let desktop = self.add_entity(
+            crate::world::DIRECTORY,
+            "desktop",
+            desktop_path
+                .to_str()
+                .ok_or_else(|| storage::invalid("desktop path must be UTF-8"))?,
+        );
+        self.link(EntityId(0), crate::world::Relationship::Contains, desktop)?;
         for (name, value) in [
             ("git status tool", "1"),
             ("git diff tool", "2"),
@@ -102,6 +120,25 @@ impl DamonData {
         }
         self.world.context.focus(EntityId(0));
         Ok(())
+    }
+    fn ensure_system_entities(&mut self) -> io::Result<()> {
+        let Some(machine) = self.resolve("damon") else {
+            return Err(storage::invalid("built-in Damon entity is missing"));
+        };
+        let host = self.add_entity(crate::world::HOST, "local host", "");
+        self.link(machine, crate::world::Relationship::RunsOn, host)?;
+        let base = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or(std::env::current_dir()?);
+        let desktop_path = base.join("Desktop");
+        let desktop = self.add_entity(
+            crate::world::DIRECTORY,
+            "desktop",
+            desktop_path
+                .to_str()
+                .ok_or_else(|| storage::invalid("desktop path must be UTF-8"))?,
+        );
+        self.link(machine, crate::world::Relationship::Contains, desktop)
     }
     pub fn add_entity(&mut self, kind: u16, name: &str, value: &str) -> EntityId {
         if let Some(id) = self.names.get(&name.to_ascii_lowercase()) {
@@ -373,6 +410,7 @@ impl DamonData {
         self.memo.encode(&mut f)?;
         self.strategies.encode(&mut f)?;
         self.capabilities.encode(&mut f)?;
+        write_u16(&mut f, self.semantic_registry_version)?;
         if f.len() > storage::MAX_IMAGE {
             return Err(storage::invalid("brain image exceeds size limit"));
         }
@@ -382,6 +420,7 @@ impl DamonData {
         let mut r = Reader { bytes, pos: 0 };
         let header = r.take(8)?;
         if header != MAGIC
+            && header != CAPABILITY
             && header != STRATEGY
             && header != MEMO
             && header != WORLD
@@ -432,6 +471,7 @@ impl DamonData {
             });
         }
         if header == MAGIC
+            || header == CAPABILITY
             || header == STRATEGY
             || header == MEMO
             || header == WORLD
@@ -483,19 +523,30 @@ impl DamonData {
                 }
             }
         }
-        if header == MAGIC || header == STRATEGY || header == MEMO || header == WORLD {
+        if header == MAGIC
+            || header == CAPABILITY
+            || header == STRATEGY
+            || header == MEMO
+            || header == WORLD
+        {
             data.world = crate::world::World::decode(&mut r, data.entities.len())?;
         } else {
             data.world.rebuild(data.entities.len())?;
         }
-        if header == MAGIC || header == STRATEGY || header == MEMO {
+        if header == MAGIC || header == CAPABILITY || header == STRATEGY || header == MEMO {
             data.memo = crate::cache::MemoTable::decode(&mut r, &data.entities)?;
         }
-        if header == MAGIC || header == STRATEGY {
+        if header == MAGIC || header == CAPABILITY || header == STRATEGY {
             data.strategies = crate::strategy::StrategyTable::decode(&mut r)?;
         }
-        if header == MAGIC {
+        if header == MAGIC || header == CAPABILITY {
             data.capabilities = crate::capability::CapabilityGraph::decode(&mut r)?;
+        }
+        if header == MAGIC {
+            data.semantic_registry_version = r.u16()?;
+            if data.semantic_registry_version != crate::semantic_registry::VERSION {
+                return Err(storage::invalid("unsupported semantic registry version"));
+            }
         }
         for alias in &data.world.aliases {
             if data
@@ -627,6 +678,56 @@ mod tests {
         }
     }
 
+    #[test]
+    fn revision_six_capability_image_migrates_to_semantic_registry() {
+        let p =
+            std::env::temp_dir().join(format!("damon-v6-migration-{}.data", std::process::id()));
+        for suffix in ["", ".journal", ".prev", ".lock"] {
+            let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
+        }
+        let mut d = DamonData::open(&p).unwrap();
+        d.capabilities.implementations.retain(|implementation| {
+            !matches!(
+                implementation.capability,
+                crate::capability::INSPECT_INTERFACES | crate::capability::INSPECT_ROUTES
+            )
+        });
+        d.capabilities
+            .capabilities
+            .iter_mut()
+            .find(|capability| capability.id == crate::capability::INSPECT_ROUTES)
+            .unwrap()
+            .effects = crate::types::Effects::READ;
+        d.compact().unwrap();
+        drop(d);
+        let image = fs::read(&p).unwrap();
+        let (generation, payload, _) = storage::unframe(&image).unwrap();
+        let mut old = payload[..payload.len() - 2].to_vec();
+        old[..8].copy_from_slice(CAPABILITY);
+        fs::write(&p, storage::frame(generation, &old).unwrap()).unwrap();
+
+        let mut migrated = DamonData::open(&p).unwrap();
+        assert_eq!(
+            migrated.semantic_registry_version,
+            crate::semantic_registry::VERSION
+        );
+        assert!(migrated.resolve("desktop").is_some());
+        assert_eq!(
+            migrated
+                .capabilities
+                .resolve_tool(crate::capability::INSPECT_ROUTES),
+            Some(crate::types::ToolId(7))
+        );
+        migrated.compact().unwrap();
+        drop(migrated);
+        let image = fs::read(&p).unwrap();
+        let (_, payload, _) = storage::unframe(&image).unwrap();
+        assert_eq!(&payload[..8], MAGIC);
+        for suffix in ["", ".journal", ".prev", ".lock"] {
+            let _ = fs::remove_file(format!("{}{}", p.display(), suffix));
+        }
+    }
+
     fn tail_lengths(data: &DamonData) -> (usize, usize, usize) {
         let mut memo = Vec::new();
         data.memo.encode(&mut memo).unwrap();
@@ -634,6 +735,6 @@ mod tests {
         data.strategies.encode(&mut strategy).unwrap();
         let mut capability = Vec::new();
         data.capabilities.encode(&mut capability).unwrap();
-        (memo.len(), strategy.len(), capability.len())
+        (memo.len(), strategy.len(), capability.len() + 2)
     }
 }
