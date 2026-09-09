@@ -5,6 +5,7 @@ repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 arm_target="aarch64-apple-darwin"
 intel_target="x86_64-apple-darwin"
 release_dir="$repo_dir/target/release-package"
+version="$(tr -d '[:space:]' < "$repo_dir/release/version")"
 app_dir="$release_dir/Damon.app"
 stage_dir="$(mktemp -d)"
 trap 'rm -rf "$stage_dir"' EXIT
@@ -49,5 +50,5 @@ hdiutil create \
   -srcfolder "$stage_dir" \
   -ov \
   -format UDZO \
-  "$release_dir/Damon-0.1.2-Universal.dmg"
-shasum -a 256 "$release_dir/Damon-0.1.2-Universal.dmg" > "$release_dir/Damon-0.1.2-Universal.dmg.sha256"
+  "$release_dir/Damon-$version-Universal.dmg"
+shasum -a 256 "$release_dir/Damon-$version-Universal.dmg" > "$release_dir/Damon-$version-Universal.dmg.sha256"

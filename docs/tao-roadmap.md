@@ -47,6 +47,9 @@ Delivered milestones:
   the normal capability, policy, execution, and verification path.
 - Native SwiftUI conversation window, private line-delimited runtime protocol,
   Universal 2 application bundle, DMG packaging, and GitHub release automation.
+- Zero-third-party-crate Rust core with a bounded ordered-row JSON reader,
+  native Ollama HTTP streaming, constrained meaning shapes, installed-model
+  selection, one bounded semantic repair, and truthful runtime state events.
 
 Remaining implementation priorities:
 

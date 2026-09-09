@@ -3,7 +3,8 @@
 Damon is a local-first Rust runtime with natural English as its human interface.
 The `tao` branch uses compact IDs and arrays for memory, hashes for recognition,
 graphs for meaning, count-based uncertainty, and deterministic tools for work.
-LLMs are fallback teachers. They never execute actions directly.
+Verified learned meanings and small exact rules are the fast path. Ollama reads
+new language into bounded meaning rows. It never executes actions directly.
 
 Networking starts with byte arrays, interfaces, addresses, packets, neighbors,
 routes, sockets, connections, protocol state, and a network graph—not HTTP or the
@@ -11,10 +12,13 @@ web. Likewise, computer use resolves to native capabilities over system, network
 compute, and data primitives before any application or UI fallback. See the
 [network architecture](docs/network-architecture.md) and
 [capability direction](docs/capabilities.md).
+The [core structure diagrams](docs/core-architecture.md) show the runtime as UML.
 
+The Rust core has zero third-party crate dependencies. Its bounded JSON reader,
+canonical meaning encoding, local HTTP client, storage, graph, cache, and network
+algorithms use only Rust's standard library and operating-system interfaces.
 There is no runtime database, ORM, vector database, agent framework, or provider
-SDK. Serde provides strict, well-tested model-facing JSON decoding; Damon's
-canonical compact semantic encoding remains a small deterministic implementation.
+SDK. SwiftUI is only the thin macOS window around the Rust process.
 
 ## Run locally
 
@@ -25,7 +29,10 @@ Download the Universal macOS DMG from the latest GitHub release, open it, and dr
 nested runtime cannot be altered unnoticed, but it is not Apple-notarized yet.
 On first launch, Control-click Damon and choose **Open** if Gatekeeper asks.
 
-The app is a deliberately small native chat window. Type ordinary English and
+The app is a deliberately small native chat window. It lists the models installed
+in Ollama, remembers your selection, and shows the runtime's real state: processing,
+asking Ollama, thinking, checking meaning, running, verifying, learning, or ready.
+“Thinking” is shown only after Ollama sends thinking data. Type ordinary English and
 Damon replies with structured results from the local runtime. Conversation is
 the interface; internal commands, tool IDs, capability IDs, and semantic graphs
 are never shown. Live memory remains on your Mac under `~/.damon/`.
@@ -86,18 +93,22 @@ must be protected as personal data. Credentials do not belong in the brain.
 
 ## Local/free-first inference
 
-Routing tries deterministic or verified learned graphs first, then:
+Routing reuses verified learned graphs and exact known meanings first, then:
 
-1. Ollama (`qwen3:8b` by default; `DAMON_OLLAMA_MODEL` selects another model).
+1. Ollama's local HTTP service (`qwen3:8b` is the initial preference; the macOS
+   picker selects any installed model).
 2. Optional free/local wrapper set by `DAMON_MODEL_COMMAND`.
 3. Optional `DAMON_CLOUD_COMMAND`, only with `DAMON_ALLOW_CLOUD=1`.
 
-Commands receive a bounded prompt on stdin and return strict semantic JSON on
-stdout. All providers use the same meaning-only contract and context-local entity
+Ollama receives a short prompt plus a dynamically restricted JSON shape over a
+timeout-bounded local socket. Damon streams the response, distinguishes actual
+thinking from waiting, and allows one final repair when a candidate fails validation.
+External commands receive a bounded prompt on stdin and return strict semantic JSON
+on stdout. All providers use the same meaning-only contract and context-local entity
 slots; no model can select a tool, command, application, protocol, or persistent
 entity ID. Provider commands are trusted operator configuration, never model output.
-Each enabled route is attempted once, with a 30-second timeout. Invalid graphs
-fall through to the next route. Cloud is disabled by default. When enabled,
+Invalid graphs fall through to the next route; the whole meaning attempt is bounded.
+Cloud is disabled by default. When enabled,
 `DAMON_CLOUD_CALL_LIMIT` caps attempts per session (default one); a paid wrapper
 must also enforce its provider-specific monetary budget. No provider SDK is
 required. Set `DAMON_OLLAMA_MODEL=''` to skip Ollama.

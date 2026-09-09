@@ -17,6 +17,33 @@ pub struct Damon {
     pub policy: Policy,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeState {
+    Processing,
+    AskingOllama,
+    Thinking,
+    CheckingMeaning,
+    Running,
+    Verifying,
+    Learning,
+    Ready,
+}
+
+impl RuntimeState {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Processing => "processing",
+            Self::AskingOllama => "asking_ollama",
+            Self::Thinking => "thinking",
+            Self::CheckingMeaning => "checking_meaning",
+            Self::Running => "running",
+            Self::Verifying => "verifying",
+            Self::Learning => "learning",
+            Self::Ready => "ready",
+        }
+    }
+}
+
 impl Damon {
     pub fn open_default() -> io::Result<Self> {
         let path = env::var_os("DAMON_DATA")
@@ -30,6 +57,21 @@ impl Damon {
     }
 
     pub fn handle(&mut self, input: &str) -> String {
+        self.handle_with_events(input, |_| {})
+    }
+
+    pub fn handle_with_events(
+        &mut self,
+        input: &str,
+        mut event: impl FnMut(RuntimeState),
+    ) -> String {
+        event(RuntimeState::Processing);
+        let response = self.handle_inner(input, &mut event);
+        event(RuntimeState::Ready);
+        response
+    }
+
+    fn handle_inner(&mut self, input: &str, event: &mut impl FnMut(RuntimeState)) -> String {
         if let Some(response) = conversational_response(input) {
             return response;
         }
@@ -39,7 +81,7 @@ impl Damon {
         if let Some(result) = self.maintain_memory(input) {
             return result;
         }
-        if let Some(result) = self.handle_native_semantic(input) {
+        if let Some(result) = self.handle_native_semantic(input, event) {
             return result;
         }
         let feature = language::feature_hash(input);
@@ -54,7 +96,7 @@ impl Damon {
                     {
                         candidate_to_meaning(best, 170)
                     } else {
-                        match self.ask_teacher(input) {
+                        match self.ask_teacher(input, event) {
                             Ok((m, provider, latency_ms)) => {
                                 teacher = Some((provider, latency_ms));
                                 m
@@ -66,7 +108,7 @@ impl Damon {
                     return "I don't know how to do that yet.".into();
                 }
             }
-            Interpretation::Unknown { .. } => match self.ask_teacher(input) {
+            Interpretation::Unknown { .. } => match self.ask_teacher(input, event) {
                 Ok((m, provider, latency_ms)) => {
                     teacher = Some((provider, latency_ms));
                     m
@@ -75,6 +117,7 @@ impl Damon {
             },
         };
 
+        event(RuntimeState::CheckingMeaning);
         if let Err(e) = crate::semantics::validate_request(input, &meaning, &self.data) {
             return format!("I need a clearer request: {e}");
         }
@@ -113,6 +156,7 @@ impl Damon {
         let mut outcomes: Vec<bool> = Vec::new();
         let mut messages = Vec::new();
         let mut strategy_errors = Vec::new();
+        event(RuntimeState::Running);
         for (index, action) in plan.actions.iter().enumerate() {
             if plan
                 .dependencies
@@ -127,6 +171,7 @@ impl Damon {
             }
             let started = Instant::now();
             let result = tools::execute(action, &self.policy);
+            event(RuntimeState::Verifying);
             let structured = crate::result_ir::ResultIr::from_tool(action, &result);
             if let Some(implementation) = self.data.capabilities.resolve_index(action.capability) {
                 if let Err(error) = self
@@ -154,6 +199,7 @@ impl Damon {
             outcomes.push(result.success);
             messages.push(structured.render_english());
         }
+        event(RuntimeState::Learning);
         let all_succeeded = outcomes.iter().all(|value| *value);
         if all_succeeded {
             if let Err(error) = self.data.procedures.remember_verified(feature, &plan) {
@@ -254,7 +300,11 @@ impl Damon {
         None
     }
 
-    fn handle_native_semantic(&mut self, input: &str) -> Option<String> {
+    fn handle_native_semantic(
+        &mut self,
+        input: &str,
+        event: &mut impl FnMut(RuntimeState),
+    ) -> Option<String> {
         use crate::semantic_ir::SemanticProducer;
         let request = crate::semantic_ir::request(input, &self.data);
         let resolution = language::DeterministicProducer { data: &self.data }.resolve(&request);
@@ -268,6 +318,7 @@ impl Damon {
             Err(error) => return Some(format!("I need a clearer request: {error}")),
         };
         let action = &mut plan.actions[0];
+        event(RuntimeState::CheckingMeaning);
         if let Err(error) = tools::prepare(action, &mut self.data) {
             return Some(format!("Deterministic discovery failed: {error}"));
         }
@@ -275,7 +326,9 @@ impl Damon {
             return Some(format!("Policy blocked the plan: {error}"));
         }
         let started = Instant::now();
+        event(RuntimeState::Running);
         let result = tools::execute(action, &self.policy);
+        event(RuntimeState::Verifying);
         let rendered = crate::result_ir::ResultIr::from_tool(action, &result).render_english();
         if let Some(implementation) = self.data.capabilities.resolve_index(action.capability) {
             let _ = self
@@ -295,6 +348,7 @@ impl Damon {
                 risk: action_risk(action.effects),
             },
         );
+        event(RuntimeState::Learning);
         Some(match self.data.save() {
             Ok(()) => rendered,
             Err(error) => format!(
@@ -306,28 +360,46 @@ impl Damon {
     fn ask_teacher(
         &self,
         input: &str,
+        event: &mut impl FnMut(RuntimeState),
     ) -> Result<(MeaningGraph, crate::model::ProviderKind, u64), String> {
         let request = crate::semantic_ir::request(input, &self.data);
         let prompt = crate::semantic_ir::prompt(&request, false);
+        let schema = crate::semantic_ir::json_schema(&request);
         let started = Instant::now();
-        let response = self.models.infer_validated(&prompt, |text| {
-            use crate::semantic_ir::SemanticProducer;
-            let resolution =
-                crate::semantic_ir::JsonSemanticProducer { output: text }.resolve(&request);
-            if let Some(error) = resolution.diagnostic.as_deref() {
-                return Err(error.to_string());
+        let first = self.models.infer_structured_validated_with_events(
+            &prompt,
+            &schema,
+            |text| validate_teacher_output(input, text, &request, &self.data),
+            |model_event| match model_event {
+                crate::model::ModelEvent::AskingOllama => event(RuntimeState::AskingOllama),
+                crate::model::ModelEvent::Thinking => event(RuntimeState::Thinking),
+                crate::model::ModelEvent::Processing => event(RuntimeState::Processing),
+            },
+        );
+        let response = match first {
+            Ok(response) => response,
+            Err(first_error) => {
+                let repair = format!(
+                    "{prompt}\nYour previous candidate was rejected. Make one final fresh attempt. Follow the schema exactly; return meaning only."
+                );
+                self.models
+                    .infer_structured_validated_with_events(
+                        &repair,
+                        &schema,
+                        |text| validate_teacher_output(input, text, &request, &self.data),
+                        |model_event| match model_event {
+                            crate::model::ModelEvent::AskingOllama => {
+                                event(RuntimeState::AskingOllama)
+                            }
+                            crate::model::ModelEvent::Thinking => event(RuntimeState::Thinking),
+                            crate::model::ModelEvent::Processing => event(RuntimeState::Processing),
+                        },
+                    )
+                    .map_err(|second_error| {
+                        format!("{first_error}; repair failed: {second_error}")
+                    })?
             }
-            if resolution.status != crate::semantic_ir::ResolutionStatus::Resolved {
-                return Err("teacher did not produce exactly one unambiguous candidate".into());
-            }
-            let meaning = crate::semantic_ir::bind(
-                &resolution.candidates[0].ir,
-                &request,
-                &self.data,
-                crate::semantic_ir::computed_confidence(&resolution, 0),
-            )?;
-            crate::semantics::validate_request(input, &meaning, &self.data)
-        })?;
+        };
         use crate::semantic_ir::SemanticProducer;
         let resolution = crate::semantic_ir::JsonSemanticProducer {
             output: &response.text,
@@ -352,6 +424,29 @@ impl Damon {
             started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
         ))
     }
+}
+
+fn validate_teacher_output(
+    input: &str,
+    text: &str,
+    request: &crate::semantic_ir::SemanticRequest,
+    data: &DamonData,
+) -> Result<(), String> {
+    use crate::semantic_ir::SemanticProducer;
+    let resolution = crate::semantic_ir::JsonSemanticProducer { output: text }.resolve(request);
+    if let Some(error) = resolution.diagnostic.as_deref() {
+        return Err(error.to_string());
+    }
+    if resolution.status != crate::semantic_ir::ResolutionStatus::Resolved {
+        return Err("teacher did not produce exactly one unambiguous candidate".into());
+    }
+    let meaning = crate::semantic_ir::bind(
+        &resolution.candidates[0].ir,
+        request,
+        data,
+        crate::semantic_ir::computed_confidence(&resolution, 0),
+    )?;
+    crate::semantics::validate_request(input, &meaning, data)
 }
 
 fn conversational_response(input: &str) -> Option<String> {

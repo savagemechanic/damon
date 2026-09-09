@@ -2,6 +2,7 @@ pub mod cache;
 pub mod capability;
 pub mod data;
 pub mod graph;
+pub mod json;
 pub mod language;
 pub mod learning;
 pub mod model;

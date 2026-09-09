@@ -1,7 +1,14 @@
 import SwiftUI
 
-private struct ChatResponse: Decodable {
-    let response: String
+private struct ChatEvent: Decodable {
+    let type: String?
+    let state: String?
+    let response: String?
+    let models: [String]?
+    let selected: String?
+    let model: String?
+    let message: String?
+    let ok: Bool?
 }
 
 private struct Message: Identifiable {
@@ -17,6 +24,10 @@ private final class DamonSession: ObservableObject, @unchecked Sendable {
     ]
     @Published var input = ""
     @Published var available = false
+    @Published var models: [String] = []
+    @Published var selectedModel = ""
+    @Published var state = "Starting"
+    @Published var modelMessage = ""
 
     private var process: Process?
     private var inputPipe: Pipe?
@@ -36,10 +47,29 @@ private final class DamonSession: ObservableObject, @unchecked Sendable {
         input = ""
         messages.append(Message(fromDamon: false, text: text))
         do {
-            try pipe.fileHandleForWriting.write(contentsOf: Data((text + "\n").utf8))
+            try writeCommand(["type": "request", "text": text], to: pipe)
         } catch {
             available = false
             messages.append(Message(fromDamon: true, text: "I could not receive that request: \(error.localizedDescription)"))
+        }
+    }
+
+    func refreshModels() {
+        guard let pipe = inputPipe else { return }
+        do {
+            modelMessage = ""
+            try writeCommand(["type": "list_models"], to: pipe)
+        } catch {
+            modelMessage = "Could not ask Ollama for its models."
+        }
+    }
+
+    func selectModel(_ model: String) {
+        guard !model.isEmpty, let pipe = inputPipe else { return }
+        do {
+            try writeCommand(["type": "select_model", "model": model], to: pipe)
+        } catch {
+            modelMessage = "Could not select \(model)."
         }
     }
 
@@ -94,6 +124,8 @@ private final class DamonSession: ObservableObject, @unchecked Sendable {
             self.process = process
             self.inputPipe = inputPipe
             available = true
+            state = "Ready"
+            refreshModels()
         } catch {
             messages.append(Message(fromDamon: true, text: "Damon could not start: \(error.localizedDescription)"))
         }
@@ -106,12 +138,66 @@ private final class DamonSession: ObservableObject, @unchecked Sendable {
             pending.removeSubrange(...newline)
             guard !line.isEmpty else { continue }
             do {
-                let decoded = try JSONDecoder().decode(ChatResponse.self, from: Data(line))
-                messages.append(Message(fromDamon: true, text: decoded.response))
+                let event = try JSONDecoder().decode(ChatEvent.self, from: Data(line))
+                consume(event)
             } catch {
                 messages.append(Message(fromDamon: true, text: "The runtime returned an unreadable response."))
             }
         }
+    }
+
+    private func consume(_ event: ChatEvent) {
+        switch event.type ?? "response" {
+        case "state":
+            state = displayState(event.state ?? "processing")
+        case "response":
+            if let response = event.response {
+                messages.append(Message(fromDamon: true, text: response))
+            }
+        case "models":
+            models = event.models ?? []
+            let configured = event.selected ?? ""
+            let preferred = UserDefaults.standard.string(forKey: "ollamaModel") ?? ""
+            let choice = models.contains(preferred)
+                ? preferred
+                : (models.contains(configured) ? configured : (models.first ?? ""))
+            selectedModel = choice
+            if !choice.isEmpty && choice != configured {
+                selectModel(choice)
+            }
+            modelMessage = models.isEmpty ? "No Ollama models installed" : "Ollama connected"
+        case "model_selected":
+            if event.ok == true {
+                selectedModel = event.model ?? selectedModel
+                UserDefaults.standard.set(selectedModel, forKey: "ollamaModel")
+            }
+            modelMessage = event.message ?? ""
+        case "model_error":
+            models = []
+            selectedModel = ""
+            modelMessage = "Ollama is not connected"
+        default:
+            break
+        }
+    }
+
+    private func displayState(_ value: String) -> String {
+        switch value {
+        case "asking_ollama": return "Asking Ollama"
+        case "thinking": return "Thinking"
+        case "checking_meaning": return "Checking meaning"
+        case "running": return "Running"
+        case "verifying": return "Verifying"
+        case "learning": return "Learning"
+        case "ready": return "Ready"
+        default: return "Processing"
+        }
+    }
+
+    private func writeCommand(_ command: [String: String], to pipe: Pipe) throws {
+        var data = try JSONSerialization.data(withJSONObject: command)
+        data.append(0x0a)
+        try pipe.fileHandleForWriting.write(contentsOf: data)
     }
 }
 
@@ -138,6 +224,38 @@ private struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(session.state == "Ready" ? Color.green : Color.orange)
+                    .frame(width: 8, height: 8)
+                Text(session.state)
+                    .font(.callout)
+                Spacer()
+                if !session.models.isEmpty {
+                    Picker("Model", selection: $session.selectedModel) {
+                        ForEach(session.models, id: \.self) { model in
+                            Text(model).tag(model)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 260)
+                    .onChange(of: session.selectedModel) { model in
+                        session.selectModel(model)
+                    }
+                } else {
+                    Text(session.modelMessage)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Button(action: session.refreshModels) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh Ollama models")
+                .disabled(!session.available)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            Divider()
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 12) {

@@ -46,6 +46,14 @@ fn run_tests_json(entity_slot: u16) -> String {
     )
 }
 
+fn project_candidate_json(action: u32, entity_slot: u16) -> String {
+    format!(
+        "{{\"nodes\":[{{\"kind\":\"ACTION\",\"concept\":{action},\"value\":0}},{{\"kind\":\"ENTITY\",\"concept\":{},\"value\":{entity_slot}}}],\"edges\":[{{\"source\":0,\"predicate\":{},\"target\":1}}]}}",
+        registry::PROJECT.0,
+        registry::TARGET.0
+    )
+}
+
 #[test]
 fn strict_json_rejects_schema_concepts_slots_edges_and_missing_arguments() {
     let fixture = Fixture::new();
@@ -165,6 +173,10 @@ fn prompt_exposes_meaning_but_not_implementations() {
         assert!(!prompt.contains("ToolId"));
     }
     assert!(compact.len() < full.len());
+    let schema = semantic_ir::json_schema(&request);
+    damon::json::parse(&schema).unwrap();
+    assert!(schema.contains(&registry::RUN_TESTS.0.to_string()));
+    assert!(!schema.contains("cargo"));
 }
 
 #[test]
@@ -196,15 +208,11 @@ fn multiple_valid_model_candidates_remain_ambiguous() {
     let fixture = Fixture::new();
     let data = fixture.data();
     let request = semantic_ir::request("run the tests in Damon", &data);
-    let object: serde_json::Value = serde_json::from_str(&run_tests_json(0)).unwrap();
-    let one = object["candidates"][0].clone();
-    let json = serde_json::json!({
-        "ir_version": 1,
-        "registry_version": registry::VERSION,
-        "candidates": [one.clone(), one],
-        "unresolved_spans": []
-    })
-    .to_string();
+    let one = project_candidate_json(registry::RUN_TESTS.0, 0);
+    let json = format!(
+        "{{\"ir_version\":1,\"registry_version\":{},\"candidates\":[{one},{one}],\"unresolved_spans\":[]}}",
+        registry::VERSION
+    );
     assert_eq!(
         semantic_ir::parse_json(&json, &request).unwrap().status,
         ResolutionStatus::Ambiguous
@@ -222,24 +230,12 @@ fn damon_ranks_candidates_from_context_not_model_confidence() {
         language::feature_hash("run tests"),
     );
     let request = semantic_ir::request("run tests or show diff", &data);
-    let candidate = |action: u32| {
-        serde_json::json!({
-            "nodes": [
-                {"kind": "ACTION", "concept": action, "value": 0},
-                {"kind": "ENTITY", "concept": registry::PROJECT.0, "value": 0}
-            ],
-            "edges": [
-                {"source": 0, "predicate": registry::TARGET.0, "target": 1}
-            ]
-        })
-    };
-    let json = serde_json::json!({
-        "ir_version": 1,
-        "registry_version": registry::VERSION,
-        "candidates": [candidate(registry::SHOW_DIFF.0), candidate(registry::RUN_TESTS.0)],
-        "unresolved_spans": []
-    })
-    .to_string();
+    let first = project_candidate_json(registry::SHOW_DIFF.0, 0);
+    let second = project_candidate_json(registry::RUN_TESTS.0, 0);
+    let json = format!(
+        "{{\"ir_version\":1,\"registry_version\":{},\"candidates\":[{first},{second}],\"unresolved_spans\":[]}}",
+        registry::VERSION
+    );
     let resolution = semantic_ir::parse_json(&json, &request).unwrap();
     assert_eq!(resolution.status, ResolutionStatus::Resolved);
     assert_eq!(

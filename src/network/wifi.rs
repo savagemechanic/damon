@@ -111,17 +111,17 @@ fn parse_system_profiler(
     text: &str,
     interface_id: impl Fn(&str) -> Option<InterfaceId>,
 ) -> io::Result<Vec<WifiLink>> {
-    let root: serde_json::Value = serde_json::from_str(text)
+    let root = crate::json::parse(text)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let groups = root
         .get("SPAirPortDataType")
-        .and_then(serde_json::Value::as_array)
+        .and_then(crate::json::Value::as_array)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing Wi-Fi data array"))?;
     let mut links = Vec::new();
     for interface in groups
         .iter()
         .filter_map(|group| group.get("spairport_airport_interfaces"))
-        .filter_map(serde_json::Value::as_array)
+        .filter_map(crate::json::Value::as_array)
         .flatten()
         .take(64)
     {
@@ -131,7 +131,7 @@ fn parse_system_profiler(
         }
         let current = interface
             .get("spairport_current_network_information")
-            .and_then(serde_json::Value::as_object)
+            .and_then(crate::json::Value::as_object)
             .and_then(|networks| networks.iter().next());
         let (ssid, details) = current.map_or((None, None), |(ssid, details)| {
             (Ssid::from_utf8(ssid).ok(), Some(details))
@@ -176,9 +176,9 @@ fn parse_system_profiler(
 }
 
 #[cfg(any(test, target_os = "macos"))]
-fn string<'a>(value: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
+fn string<'a>(value: &'a crate::json::Value, keys: &[&str]) -> Option<&'a str> {
     keys.iter()
-        .find_map(|key| value.get(*key).and_then(serde_json::Value::as_str))
+        .find_map(|key| value.get(key).and_then(crate::json::Value::as_str))
 }
 
 #[cfg(any(test, target_os = "macos"))]

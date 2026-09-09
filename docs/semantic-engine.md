@@ -47,13 +47,21 @@ shell, tool calls, threads, or exception handlers in model-facing IR.
 ## Producer contract and prompts
 
 Prompt assembly selects only relevant actions, predicates, entity kinds, slots,
-focus, and previous action. All providers share the checked-in templates at
+focus, and previous action. When no word cue is strong enough, the complete v1
+action set is still only twelve IDs and is exposed so unfamiliar phrasing is not
+blocked before Ollama can interpret it. All providers share the checked-in templates at
 `prompts/semantic-ir-v1.txt` and `prompts/semantic-ir-v1-compact.txt`. The full
 template carries the strict JSON shape for providers without schema enforcement;
 the compact template is intended for constrained local decoding. Unknown fields,
 invented concepts, invented slots, invalid spans, and unsupported meanings fail
-closed. Invalid output may fall through once to the next configured provider;
-there is no unbounded repair loop.
+closed. Ollama also receives a generated JSON shape whose concept and predicate
+enums match the exact request. A rejected meaning gets at most one fresh repair
+attempt. There is no unbounded repair loop.
+
+The Ollama adapter is a standard-library HTTP/1.1 client. It discovers installed
+models from the local service, streams bounded response rows, and reports a
+`thinking` state only when a non-empty thinking field is observed. The macOS
+model picker stores the user's selection and re-applies it on the next launch.
 
 Models do not supply confidence. Damon scores schema validity, bound-entity
 quality, conversation context, learned counts, and candidate margin with integers.

@@ -25,12 +25,13 @@ list files
 
 ## Model routing: free first
 
-The language engine always tries deterministic/local learned interpretation first. A model is only used when the request is unknown.
+The language engine reuses verified learned meanings and exact known requests first.
+New phrasing is translated by Ollama into the same checked meaning rows.
 
 Routing order:
 
 1. local deterministic/learned interpretation — zero inference cost
-2. local Ollama — default model `qwen3:8b`
+2. local Ollama HTTP service — selected in the macOS window
 3. optional external command from `DAMON_MODEL_COMMAND`
 4. optional cloud command from `DAMON_CLOUD_COMMAND`, but only when `DAMON_ALLOW_CLOUD=1`
 
@@ -42,7 +43,9 @@ DAMON_MODEL_COMMAND='my-free-model-wrapper' cargo run
 DAMON_ALLOW_CLOUD=1 DAMON_CLOUD_COMMAND='my-cloud-wrapper' cargo run
 ```
 
-The external command receives the prompt on stdin and must print the response on stdout. This keeps Damon provider-independent and allows free/local providers, OpenCode-style routers, or future APIs to be plugged in without adding provider SDKs to the kernel.
+Ollama receives a strict meaning-only output shape. The external command receives
+the prompt on stdin and must print the response on stdout. No provider SDK enters
+the kernel.
 
 Cloud use is intentionally disabled by default.
 
@@ -54,13 +57,15 @@ The first Tao kernel implements:
 - compact entity IDs and name hash index
 - language normalization and cheap deterministic intent scoring
 - learned phrase→intent counts persisted from verified outcomes
-- local-first model router with Ollama and generic command fallbacks
+- native Ollama socket client, installed-model selection, streamed thinking states,
+  and generic command fallbacks
 - deterministic policy effects
 - Git status/diff, test discovery, and file-listing tools
 - natural-language interactive loop
 - unit tests for binary persistence and language resolution
 
-It intentionally does **not** introduce a database, agent framework, cloud SDK, vector database, or neural runtime.
+The Rust core uses only the standard library. It intentionally does **not**
+introduce a database, agent framework, cloud SDK, vector database, or neural runtime.
 
 ## Personal state and fixtures
 
