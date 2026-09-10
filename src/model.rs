@@ -250,8 +250,14 @@ impl ModelRouter {
         let url = format!("{}{path}", self.zen_base_url.trim_end_matches('/'));
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(TIMEOUT))
+            .http_status_as_error(false)
             .build();
         let agent: ureq::Agent = config.into();
+        let operation = if authenticate {
+            "model request"
+        } else {
+            "model catalog"
+        };
         let response = match (method, body) {
             ("GET", None) => agent.get(&url).call(),
             ("POST", Some(body)) => {
@@ -267,20 +273,24 @@ impl ModelRouter {
             }
             _ => return Err("unsupported Zen request shape".into()),
         };
-        let mut response = response.map_err(|error| {
-            let operation = if authenticate {
-                "model request"
-            } else {
-                "model catalog"
-            };
-            format!("OpenCode Zen {operation} failed: {error}")
-        })?;
-        response
+        let mut response =
+            response.map_err(|error| format!("OpenCode Zen {operation} failed: {error}"))?;
+        let status = response.status();
+        let text = response
             .body_mut()
             .with_config()
             .limit(MAX_RESPONSE_BYTES as u64)
             .read_to_string()
-            .map_err(|error| format!("OpenCode Zen response is invalid or too large: {error}"))
+            .map_err(|error| format!("OpenCode Zen response is invalid or too large: {error}"))?;
+        if !status.is_success() {
+            let detail = zen_error_detail(&text)
+                .unwrap_or_else(|| "provider returned no error detail".into());
+            return Err(format!(
+                "OpenCode Zen {operation} failed (HTTP {}): {detail}",
+                status.as_u16()
+            ));
+        }
+        Ok(text)
     }
 
     fn ollama_chat(
@@ -404,6 +414,20 @@ fn zen_models_from_json(text: &str) -> Result<Vec<String>, String> {
     models.sort();
     models.dedup();
     Ok(models)
+}
+
+fn zen_error_detail(text: &str) -> Option<String> {
+    let root = crate::json::parse(text).ok()?;
+    root.get("error")
+        .and_then(|error| {
+            error
+                .get("message")
+                .and_then(crate::json::Value::as_str)
+                .or_else(|| error.as_str())
+        })
+        .or_else(|| root.get("message").and_then(crate::json::Value::as_str))
+        .filter(|message| !message.trim().is_empty())
+        .map(str::to_owned)
 }
 
 fn http_request(
@@ -826,6 +850,61 @@ mod tests {
         model.zen_base_url = format!("http://{address}");
         let response = model.zen_chat("prompt").unwrap();
         assert_eq!(response, r#"{"ok":true}"#);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn zen_http_error_preserves_observed_provider_detail() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            read_request(&mut socket);
+            let body = r#"{"type":"MissingSessionID","error":{"type":"MissingSessionID","message":"Error from provider (Console): OpenCode's free tier can only be used in OpenCode"}}"#;
+            write!(
+                socket,
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+        let mut model = router("127.0.0.1:1".into());
+        model.zen_api_key = Some("secret-test-key".into());
+        model.zen_model = "big-pickle".into();
+        model.zen_base_url = format!("http://{address}");
+        let error = model.zen_chat("prompt").unwrap_err();
+        assert!(error.contains("HTTP 400"), "{error}");
+        assert!(
+            error.contains("OpenCode's free tier can only be used in OpenCode"),
+            "{error}"
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn zen_http_error_preserves_observed_unavailable_model_detail() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            read_request(&mut socket);
+            let body = r#"{"error":{"type":"server_error","message":"Error from provider (Console): Upstream request failed: Model is unavailable."}}"#;
+            write!(
+                socket,
+                "HTTP/1.1 500 Server Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+        let mut model = router("127.0.0.1:1".into());
+        model.zen_api_key = Some("secret-test-key".into());
+        model.zen_model = "deepseek-v4-flash-free".into();
+        model.zen_base_url = format!("http://{address}");
+        let error = model.zen_chat("prompt").unwrap_err();
+        assert!(error.contains("HTTP 500"), "{error}");
+        assert!(error.contains("Model is unavailable"), "{error}");
         server.join().unwrap();
     }
 

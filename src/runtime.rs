@@ -530,7 +530,13 @@ fn teacher_unavailable(error: &str) -> String {
     let detail = if error.contains("No language teacher is configured") {
         "No language model is configured. Add an OpenCode Zen API key."
     } else if error.contains("Cloud:") || error.contains("OpenCode Zen") {
-        if error.contains("401") || error.contains("403") {
+        if error.contains("MissingSessionID")
+            || error.contains("free tier can only be used in OpenCode")
+        {
+            "OpenCode Zen restricts the selected free model to its own client, so Damon cannot use it through the API."
+        } else if error.contains("Model is unavailable") {
+            "The selected OpenCode Zen model is currently unavailable. Refresh the model list or select another API-accessible model."
+        } else if error.contains("401") || error.contains("403") {
             "OpenCode Zen rejected the API key or model access. Replace the key or select an enabled model."
         } else if error.contains("timed out") || error.contains("connect") {
             "I couldn't reach OpenCode Zen. Check the network, then retry once."
@@ -584,6 +590,21 @@ fn default_data_path() -> PathBuf {
 #[cfg(test)]
 mod policy_confirmation_tests {
     use super::*;
+
+    #[test]
+    fn observed_zen_errors_are_not_reported_as_invalid_meaning() {
+        let restricted = teacher_unavailable(
+            "OpenCode Zen model request failed (HTTP 400): Error from provider (Console): OpenCode's free tier can only be used in OpenCode",
+        );
+        assert!(restricted.contains("restricts the selected free model"));
+        assert!(!restricted.contains("meaning failed"));
+
+        let unavailable = teacher_unavailable(
+            "OpenCode Zen model request failed (HTTP 500): Error from provider (Console): Upstream request failed: Model is unavailable.",
+        );
+        assert!(unavailable.contains("currently unavailable"));
+        assert!(!unavailable.contains("meaning failed"));
+    }
 
     #[test]
     fn explicit_confirmation_executes_and_same_exact_action_never_asks_again() {
