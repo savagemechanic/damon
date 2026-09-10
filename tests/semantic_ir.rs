@@ -83,6 +83,9 @@ fn strict_json_rejects_schema_concepts_slots_edges_and_missing_arguments() {
     let invalid_edge = run_tests_json(0).replace("\"target\":1", "\"target\":99");
     assert!(semantic_ir::parse_json(&invalid_edge, &request).is_err());
 
+    let missing_required = run_tests_json(0).replace(",\"unresolved_spans\":[]", "");
+    assert!(semantic_ir::parse_json(&missing_required, &request).is_err());
+
     let missing = format!(
         "{{\"ir_version\":1,\"registry_version\":{},\"candidates\":[{{\"nodes\":[{{\"kind\":\"ACTION\",\"concept\":{},\"value\":0}}],\"edges\":[]}}],\"unresolved_spans\":[]}}",
         registry::VERSION,

@@ -1,5 +1,7 @@
 //! The model-independent, meaning-only boundary between language and execution.
 use crate::{data::DamonData, semantic_registry as registry, types::ConceptId};
+use schemars::JsonSchema;
+use serde::Deserialize;
 use std::collections::HashSet;
 
 pub const IR_VERSION: u16 = 1;
@@ -9,7 +11,8 @@ pub const MAX_CANDIDATES: usize = 3;
 pub const MAX_SLOTS: usize = 64;
 pub const MAX_INPUT_BYTES: usize = 8192;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "UPPERCASE")]
 pub enum NodeKind {
     Action,
     Entity,
@@ -17,14 +20,16 @@ pub enum NodeKind {
     Constraint,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct SourceSpan {
     pub start: u16,
     pub end: u16,
     pub expected_kind: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Node {
     pub kind: NodeKind,
     pub concept: u32,
@@ -32,16 +37,20 @@ pub struct Node {
     pub span: Option<SourceSpan>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Edge {
     pub source: u16,
     pub predicate: u32,
     pub target: u16,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct CandidateIr {
+    #[schemars(length(min = 1, max = 32))]
     pub nodes: Vec<Node>,
+    #[schemars(length(max = 64))]
     pub edges: Vec<Edge>,
 }
 
@@ -537,10 +546,14 @@ fn persistent_binding(
     }
 }
 
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct WireResolution {
     ir_version: u16,
     registry_version: u16,
+    #[schemars(length(max = 3))]
     candidates: Vec<CandidateIr>,
+    #[schemars(length(max = 32))]
     unresolved_spans: Vec<SourceSpan>,
 }
 
@@ -768,7 +781,8 @@ pub fn parse_json(text: &str, request: &SemanticRequest) -> Result<SemanticResol
     if text.len() > 32 * 1024 {
         return Err("semantic JSON exceeds 32 KiB".into());
     }
-    let wire = parse_wire_resolution(&crate::json::parse(text)?)?;
+    let wire: WireResolution =
+        serde_json::from_str(text).map_err(|error| format!("invalid semantic JSON: {error}"))?;
     if wire.ir_version != request.ir_version || wire.registry_version != request.registry_version {
         return Err("semantic or registry version mismatch".into());
     }
@@ -808,123 +822,6 @@ pub fn parse_json(text: &str, request: &SemanticRequest) -> Result<SemanticResol
         producer: ProducerKind::Model,
         diagnostic: None,
     })
-}
-
-fn parse_wire_resolution(value: &crate::json::Value) -> Result<WireResolution, String> {
-    value.fields_exact(&[
-        "ir_version",
-        "registry_version",
-        "candidates",
-        "unresolved_spans",
-    ])?;
-    let candidates = required_array(value, "candidates")?
-        .iter()
-        .map(parse_candidate)
-        .collect::<Result<Vec<_>, _>>()?;
-    let unresolved_spans = value
-        .get("unresolved_spans")
-        .map(|spans| {
-            spans
-                .as_array()
-                .ok_or_else(|| "unresolved_spans must be an array".to_string())?
-                .iter()
-                .map(parse_span)
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .transpose()?
-        .unwrap_or_default();
-    Ok(WireResolution {
-        ir_version: required_u16(value, "ir_version")?,
-        registry_version: required_u16(value, "registry_version")?,
-        candidates,
-        unresolved_spans,
-    })
-}
-
-fn parse_candidate(value: &crate::json::Value) -> Result<CandidateIr, String> {
-    value.fields_exact(&["nodes", "edges"])?;
-    Ok(CandidateIr {
-        nodes: required_array(value, "nodes")?
-            .iter()
-            .map(parse_node)
-            .collect::<Result<Vec<_>, _>>()?,
-        edges: required_array(value, "edges")?
-            .iter()
-            .map(parse_edge)
-            .collect::<Result<Vec<_>, _>>()?,
-    })
-}
-
-fn parse_node(value: &crate::json::Value) -> Result<Node, String> {
-    value.fields_exact(&["kind", "concept", "value", "span"])?;
-    let kind = match required_string(value, "kind")? {
-        "ACTION" => NodeKind::Action,
-        "ENTITY" => NodeKind::Entity,
-        "VALUE" => NodeKind::Value,
-        "CONSTRAINT" => NodeKind::Constraint,
-        _ => return Err("unknown semantic node kind".into()),
-    };
-    let span = match value.get("span") {
-        None | Some(crate::json::Value::Null) => None,
-        Some(value) => Some(parse_span(value)?),
-    };
-    Ok(Node {
-        kind,
-        concept: required_u32(value, "concept")?,
-        value: required_u32(value, "value")?,
-        span,
-    })
-}
-
-fn parse_edge(value: &crate::json::Value) -> Result<Edge, String> {
-    value.fields_exact(&["source", "predicate", "target"])?;
-    Ok(Edge {
-        source: required_u16(value, "source")?,
-        predicate: required_u32(value, "predicate")?,
-        target: required_u16(value, "target")?,
-    })
-}
-
-fn parse_span(value: &crate::json::Value) -> Result<SourceSpan, String> {
-    value.fields_exact(&["start", "end", "expected_kind"])?;
-    Ok(SourceSpan {
-        start: required_u16(value, "start")?,
-        end: required_u16(value, "end")?,
-        expected_kind: required_u32(value, "expected_kind")?,
-    })
-}
-
-fn required_array<'a>(
-    value: &'a crate::json::Value,
-    name: &str,
-) -> Result<&'a [crate::json::Value], String> {
-    value
-        .get(name)
-        .and_then(crate::json::Value::as_array)
-        .ok_or_else(|| format!("{name} must be an array"))
-}
-
-fn required_string<'a>(value: &'a crate::json::Value, name: &str) -> Result<&'a str, String> {
-    value
-        .get(name)
-        .and_then(crate::json::Value::as_str)
-        .ok_or_else(|| format!("{name} must be a string"))
-}
-
-fn required_u32(value: &crate::json::Value, name: &str) -> Result<u32, String> {
-    value
-        .get(name)
-        .and_then(crate::json::Value::as_i64)
-        .and_then(|number| u32::try_from(number).ok())
-        .ok_or_else(|| format!("{name} must be an unsigned 32-bit integer"))
-}
-
-fn required_u16(value: &crate::json::Value, name: &str) -> Result<u16, String> {
-    value
-        .get(name)
-        .and_then(crate::json::Value::as_i64)
-        .and_then(|number| u16::try_from(number).ok())
-        .ok_or_else(|| format!("{name} must be an unsigned 16-bit integer"))
 }
 
 fn score_candidate(ir: &CandidateIr, request: &SemanticRequest) -> i32 {
@@ -1597,66 +1494,86 @@ pub fn json_schema(request: &SemanticRequest) -> String {
     concepts.extend([registry::SIZE, registry::BYTES, registry::YESTERDAY]);
     concepts.sort();
     concepts.dedup();
-    let concept_ids = concepts
-        .iter()
-        .map(|id| id.0.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
+    let concept_ids = concepts.iter().map(|id| id.0).collect::<Vec<_>>();
     let predicate_ids = request
         .allowed_predicates
         .iter()
-        .map(|id| id.0.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
-    r#"{
-      "type":"object",
-      "additionalProperties":false,
-      "required":["ir_version","registry_version","candidates","unresolved_spans"],
-      "properties":{
-        "ir_version":{"type":"integer","const":$IR},
-        "registry_version":{"type":"integer","const":$REGISTRY},
-        "candidates":{"type":"array","maxItems":3,"items":{
-          "type":"object","additionalProperties":false,"required":["nodes","edges"],
-          "properties":{
-            "nodes":{"type":"array","minItems":1,"maxItems":32,"items":{
-              "type":"object","additionalProperties":false,"required":["kind","concept","value"],
-              "properties":{
-                "kind":{"type":"string","enum":["ACTION","ENTITY","VALUE","CONSTRAINT"]},
-                "concept":{"type":"integer","enum":[$CONCEPTS]},
-                "value":{"type":"integer","minimum":0,"maximum":4294967295},
-                "span":{"type":"object","additionalProperties":false,
-                  "required":["start","end","expected_kind"],
-                  "properties":{
-                    "start":{"type":"integer","minimum":0,"maximum":65535},
-                    "end":{"type":"integer","minimum":0,"maximum":65535},
-                    "expected_kind":{"type":"integer"}
-                  }
-                }
-              }
-            }},
-            "edges":{"type":"array","maxItems":64,"items":{
-              "type":"object","additionalProperties":false,"required":["source","predicate","target"],
-              "properties":{
-                "source":{"type":"integer","minimum":0,"maximum":65535},
-                "predicate":{"type":"integer","enum":[$PREDICATES]},
-                "target":{"type":"integer","minimum":0,"maximum":65535}
-              }
-            }}
-          }
-        }},
-        "unresolved_spans":{"type":"array","maxItems":32,"items":{
-          "type":"object","additionalProperties":false,
-          "required":["start","end","expected_kind"],
-          "properties":{
-            "start":{"type":"integer","minimum":0,"maximum":65535},
-            "end":{"type":"integer","minimum":0,"maximum":65535},
-            "expected_kind":{"type":"integer"}
-          }
-        }}
-      }
-    }"#
-    .replace("$IR", &request.ir_version.to_string())
-    .replace("$REGISTRY", &request.registry_version.to_string())
-    .replace("$CONCEPTS", &concept_ids)
-    .replace("$PREDICATES", &predicate_ids)
+        .map(|id| id.0)
+        .collect::<Vec<_>>();
+    let entity_kind_ids = request
+        .allowed_entity_kinds
+        .iter()
+        .map(|id| id.0)
+        .collect::<Vec<_>>();
+    let mut schema = serde_json::to_value(schemars::schema_for!(WireResolution))
+        .expect("generated semantic schema must serialize");
+    constrain_schema(
+        &mut schema,
+        request.ir_version,
+        request.registry_version,
+        &concept_ids,
+        &predicate_ids,
+        &entity_kind_ids,
+    );
+    serde_json::to_string(&schema).expect("generated semantic schema must encode")
+}
+
+fn constrain_schema(
+    value: &mut serde_json::Value,
+    ir_version: u16,
+    registry_version: u16,
+    concept_ids: &[u32],
+    predicate_ids: &[u32],
+    entity_kind_ids: &[u32],
+) {
+    let serde_json::Value::Object(object) = value else {
+        return;
+    };
+    if let Some(serde_json::Value::Object(properties)) = object.get_mut("properties") {
+        if properties.contains_key("candidates") && properties.contains_key("unresolved_spans") {
+            set_const(properties.get_mut("ir_version"), u32::from(ir_version));
+            set_const(
+                properties.get_mut("registry_version"),
+                u32::from(registry_version),
+            );
+        }
+        if properties.contains_key("kind") && properties.contains_key("concept") {
+            set_enum(properties.get_mut("concept"), concept_ids);
+        }
+        if properties.contains_key("source") && properties.contains_key("predicate") {
+            set_enum(properties.get_mut("predicate"), predicate_ids);
+        }
+        if properties.contains_key("start") && properties.contains_key("expected_kind") {
+            set_enum(properties.get_mut("expected_kind"), entity_kind_ids);
+        }
+    }
+    for child in object.values_mut() {
+        constrain_schema(
+            child,
+            ir_version,
+            registry_version,
+            concept_ids,
+            predicate_ids,
+            entity_kind_ids,
+        );
+    }
+}
+
+fn set_const(value: Option<&mut serde_json::Value>, constraint: u32) {
+    if let Some(serde_json::Value::Object(schema)) = value {
+        schema.insert("const".into(), constraint.into());
+    }
+}
+
+fn set_enum(value: Option<&mut serde_json::Value>, constraints: &[u32]) {
+    if let Some(serde_json::Value::Object(schema)) = value {
+        schema.insert(
+            "enum".into(),
+            constraints
+                .iter()
+                .copied()
+                .map(serde_json::Value::from)
+                .collect(),
+        );
+    }
 }

@@ -15,10 +15,11 @@ compute, and data primitives before any application or UI fallback. See the
 [capability direction](docs/capabilities.md).
 The [core structure diagrams](docs/core-architecture.md) show the runtime as UML.
 
-The Rust core is standard-library-first. Its bounded JSON reader, canonical
-meaning encoding, storage, graph, cache, and network algorithms use Rust's
-standard library and operating-system interfaces. HTTPS uses the established
-`ureq` and `rustls` crates instead of custom TLS.
+The Rust core keeps Damon semantics in its own typed arrays, graphs, reducers,
+and algorithms. Serde and Schemars provide the typed model boundary; the custom
+binary state, canonical meaning encoding, graph, cache, and network algorithms
+remain Damon-owned. HTTPS uses the established `ureq` and `rustls` crates instead
+of custom TLS. See the [mechanism crate plan](docs/crate-integration-plan.md).
 There is no runtime database, ORM, vector database, agent framework, or provider
 SDK. SwiftUI is only the thin macOS window around the Rust process.
 
