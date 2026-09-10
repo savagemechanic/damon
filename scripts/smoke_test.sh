@@ -27,11 +27,20 @@ runtime="$(find "$frameworks/Python.framework/Versions" -type f -path '*/bin/pyt
 test -x "$runtime"
 DYLD_FRAMEWORK_PATH="$frameworks" "$runtime" --version
 stage="mock readiness"
-python3 "$root/scripts/mock_zen.py" --port-file "$temporary/mock-port" &
+DYLD_FRAMEWORK_PATH="$frameworks" "$runtime" "$root/scripts/mock_zen.py" --port-file "$temporary/mock-port" &
 mock_pid=$!
-for _ in {1..100}; do [[ -f "$temporary/mock-port" ]] && break; sleep 0.1; done
-test -f "$temporary/mock-port"
+for _ in {1..300}; do
+  [[ -f "$temporary/mock-port" ]] && break
+  if ! kill -0 "$mock_pid" 2>/dev/null; then echo "mock Zen server exited before readiness" >&2; exit 1; fi
+  sleep 0.1
+done
+if [[ ! -f "$temporary/mock-port" ]]; then echo "mock Zen readiness timed out" >&2; exit 1; fi
 mock_port="$(<"$temporary/mock-port")"
+for _ in {1..100}; do
+  curl -fsS "http://127.0.0.1:$mock_port/v1/models" >/dev/null 2>&1 && break
+  sleep 0.1
+done
+if ! curl -fsS "http://127.0.0.1:$mock_port/v1/models" >/dev/null; then echo "mock Zen HTTP readiness timed out" >&2; exit 1; fi
 stage="daemon readiness"
 DAMON_ZEN_BASE_URL="http://127.0.0.1:$mock_port/v1" DAMON_MODELS_URL="http://127.0.0.1:$mock_port/models-metadata" DYLD_FRAMEWORK_PATH="$frameworks" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$temporary/extracted/Damon.app/Contents/Resources/python/src" "$runtime" -m damon.ipc.server --socket "$socket_path" --home "$temporary/home" 2>"$temporary/daemon.stderr" &
 daemon_pid=$!
