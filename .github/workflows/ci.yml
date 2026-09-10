@@ -29,6 +29,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Swift tests
         run: ./scripts/swift_test.sh
+      - name: Xcode project build
+        run: xcodebuild -project mac/Damon.xcodeproj -scheme Damon -configuration Debug CODE_SIGNING_ALLOWED=NO build
+      - name: Native UI tests
+        run: xcodebuild -project mac/Damon.xcodeproj -scheme Damon -destination 'platform=macOS' -only-testing:DamonUITests test
       - name: Build native app
         run: ./scripts/build_release.sh
       - name: Packaged smoke test

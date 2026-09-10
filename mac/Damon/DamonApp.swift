@@ -29,7 +29,13 @@ struct DamonApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.stop() }
         }
         .commands {
-            CommandGroup(after: .newItem) { Button("New Chat") { model.newChat(); model.sidebarSelection = "conversation" }.keyboardShortcut("n"); Button("Tools Library") { model.sidebarSelection = "tools" }; Button("Open Tools Folder") { NSWorkspace.shared.open(FileManager.default.homeDirectoryForCurrentUser.appending(path: ".damon/tools")) } }
+            CommandGroup(replacing: .newItem) {
+                Button("New Chat") { model.newChat(); model.sidebarSelection = "conversation" }.keyboardShortcut("n")
+            }
+            CommandGroup(after: .appInfo) {
+                Button("Tools Library") { model.sidebarSelection = "tools" }
+                Button("Open Tools Folder") { NSWorkspace.shared.open(FileManager.default.homeDirectoryForCurrentUser.appending(path: ".damon/tools")) }
+            }
         }
         Settings { SettingsView(model: model) }
     }
