@@ -17,3 +17,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install -e '.[dev]'
       - run: pytest -q
+      - name: Install Python harness
+        run: python -m pip install -e './python[dev]'
+      - name: Test Python harness
+        run: python -m pytest -q python/tests
+      - name: Compile Python harness
+        run: python -m compileall -q python/src
