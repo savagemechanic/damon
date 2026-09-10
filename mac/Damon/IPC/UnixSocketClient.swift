@@ -109,6 +109,8 @@ struct ZenModel: Codable, Equatable, Sendable {
     let name: String
     let reasoningEfforts: [String]
     enum CodingKeys: String, CodingKey { case id, name; case reasoningEfforts = "reasoning_efforts" }
+    var supportsThinkingEffort: Bool { !reasoningEfforts.isEmpty }
+    func supports(effort: String) -> Bool { effort.isEmpty || reasoningEfforts.contains(effort) }
 }
 
 struct IPCResponse: Codable, Sendable {

@@ -29,10 +29,12 @@ private func event(_ type: String, _ payload: [String: JSONValue] = [:]) -> Damo
 }
 
 @Test func thinkingEffortBelongsToModelSelection() {
-    var selection = ModelSelection(modelId: "plain")
-    #expect(!selection.supportsThinkingEffort)
-    selection.effortOptions = ["low", "high"]
-    #expect(selection.supportsThinkingEffort)
+    let plain = ZenModel(id: "plain", name: "Plain", reasoningEfforts: [])
+    let reasoning = ZenModel(id: "reasoning", name: "Reasoning", reasoningEfforts: ["low", "high"])
+    #expect(!plain.supportsThinkingEffort)
+    #expect(reasoning.supportsThinkingEffort)
+    #expect(reasoning.supports(effort: "high"))
+    #expect(!reasoning.supports(effort: "max"))
 }
 
 @Test func ipcRejectsOverlongUnixSocketPath() async {

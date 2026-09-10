@@ -1,13 +1,5 @@
 import Foundation
 
-struct ModelSelection: Equatable, Sendable {
-    var provider = "OpenCode Zen"
-    var modelId = ""
-    var thinkingEffort: String?
-    var effortOptions: [String] = []
-    var supportsThinkingEffort: Bool { !effortOptions.isEmpty }
-}
-
 struct ConversationState: Equatable, Sendable {
     var answer = ""
     var reasoning = ""
