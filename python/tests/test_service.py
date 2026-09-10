@@ -1,6 +1,7 @@
 from damon.ipc.service import DamonService
 from damon.providers.zen import ModelInfo
 import threading
+import pytest
 
 
 class Provider:
@@ -130,3 +131,25 @@ def test_service_cancel_terminates_active_execution(tmp_path):
     assert cancelled == [{"type": "cancelled", "count": 1}]
     finished = next(event for event in output if event.get("type") == "ExecutionFinished")
     assert finished["payload"]["cancelled"] is True
+
+
+class BrokenProvider:
+    def __init__(self, _key):
+        pass
+
+    def stream_chat(self, messages, model, thinking_effort=None):
+        raise RuntimeError("provider unavailable")
+        yield
+
+
+def test_run_failure_is_persisted_and_emitted(tmp_path):
+    service = DamonService(tmp_path / ".damon", provider_factory=BrokenProvider)
+    service.api_key = "secret"
+    service.catalog.cache_path.parent.mkdir(parents=True, exist_ok=True)
+    service.catalog.cache_path.write_text('{"models":[{"id":"m","name":"M"}]}')
+    output = []
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        service.dispatch({"type": "run", "message": "fail", "model": "m", "working_directory": str(tmp_path)}, output.append)
+    assert output[-1]["type"] == "Error"
+    run_id = output[0]["run_id"]
+    assert service.store.list_events(run_id)[-1]["type"] == "Error"

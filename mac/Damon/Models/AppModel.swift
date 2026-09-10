@@ -21,14 +21,15 @@ struct ConversationState: Equatable, Sendable {
     var runId: String?
     var changedFiles: [String] = []
     var error: String?
+    var isRunActive: Bool { ["Generating", "Executing Python", "Continuing"].contains(status) }
 
     mutating func apply(_ event: DamonEvent) {
         switch event.type {
         case "RunStarted": runId = event.runId
-        case "ModelStarted": status = "Generating"
+        case "ModelStarted": status = "Generating"; answer = ""
         case "ReasoningDelta": reasoning += event.payload["delta"]?.string ?? ""
         case "TextDelta": answer += event.payload["delta"]?.string ?? ""
-        case "PythonDetected": python = event.payload["source"]?.string ?? ""
+        case "PythonDetected": python = event.payload["source"]?.string ?? ""; answer = ""
         case "ScriptSaved": scriptPath = event.payload["path"]?.string
         case "ExecutionStarted": status = "Executing Python"
         case "StdoutDelta": stdout += event.payload["delta"]?.string ?? ""
@@ -38,7 +39,7 @@ struct ConversationState: Equatable, Sendable {
             duration = event.payload["duration"]?.number
             exitCode = event.payload["exit_code"]?.number.map(Int.init)
             changedFiles = event.payload["changed_files"]?.strings ?? []
-        case "RunFinished": status = "Finished"
+        case "RunFinished": status = "Finished"; answer = event.payload["answer"]?.string ?? answer
         case "Error":
             status = "Error"
             error = event.payload["message"]?.string
@@ -174,7 +175,7 @@ final class AppModel: ObservableObject {
 
     func send() {
         let message = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty, !selectedModel.isEmpty else { return }
+        guard !message.isEmpty, !selectedModel.isEmpty, !conversation.isRunActive else { return }
         input = ""
         conversation = ConversationState(status: "Generating")
         messages.append(MessageRecord(role: "user", content: message, createdAt: ""))

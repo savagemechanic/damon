@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import socket
+import stat
 import tempfile
 import threading
 
@@ -13,6 +14,7 @@ def test_unix_socket_ping_and_error_recovery():
         path = Path(directory) / "damon.sock"
         server = DamonServer(path)
         server.start()
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
         thread = threading.Thread(target=server._server.serve_forever, daemon=True)
         thread.start()
         try:

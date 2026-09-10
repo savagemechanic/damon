@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import signal
 import socketserver
@@ -52,6 +53,7 @@ class DamonServer:
         if self.socket_path.exists():
             self.socket_path.unlink()
         self._server = _UnixServer(str(self.socket_path), self.dispatch)
+        os.chmod(self.socket_path, 0o600)
 
     def serve_forever(self) -> None:
         if self._server is None:

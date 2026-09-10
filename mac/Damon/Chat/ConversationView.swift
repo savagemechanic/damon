@@ -37,7 +37,7 @@ struct ConversationView: View {
                     .onSubmit { model.send() }
                 Button("Send") { model.send() }
                     .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.isConnected || model.selectedModel.isEmpty)
+                    .disabled(model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.isConnected || model.selectedModel.isEmpty || model.conversation.isRunActive)
             }.padding()
         }
     }

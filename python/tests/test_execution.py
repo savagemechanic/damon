@@ -44,9 +44,11 @@ def test_cancellation(tmp_path):
 
 
 def test_bounds_captured_output(tmp_path):
+    chunks = []
     result = PythonExecutor(sys.executable, ExecutionPolicy(max_output_bytes=10)).run(
-        script(tmp_path, "print('x' * 100)"), tmp_path)
+        script(tmp_path, "print('x' * 100)"), tmp_path, lambda _, text: chunks.append(text))
     assert len(result.stdout.encode()) == 10 and result.output_truncated
+    assert len("".join(chunks).encode()) == 10
 
 
 def test_reports_created_modified_and_deleted_files(tmp_path):

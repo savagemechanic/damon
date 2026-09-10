@@ -11,6 +11,7 @@ from damon.config.settings import Settings
 from damon.execution.policy import ExecutionPolicy
 from damon.execution.python import PythonExecutor
 from damon.execution.store import ScriptStore
+from damon.events import DamonEvent
 from damon.harness import Harness
 from damon.providers.catalog import ModelCatalog
 from damon.providers.zen import ZenProvider
@@ -32,6 +33,7 @@ class DamonService:
         self.tools = ToolLibrary(home, self.store.connection, self.store.lock)
         self._active_executors: set[PythonExecutor] = set()
         self._active_lock = threading.Lock()
+        self._run_lock = threading.Lock()
 
     def dispatch(self, request: dict, emit: Emit) -> None:
         kind = request.get("type")
@@ -78,7 +80,12 @@ class DamonService:
                 executor.cancel()
             emit({"type": "cancelled", "count": len(active)})
         elif kind == "run":
-            self._run(request, emit)
+            if not self._run_lock.acquire(blocking=False):
+                raise RuntimeError("a Damon run is already active")
+            try:
+                self._run(request, emit)
+            finally:
+                self._run_lock.release()
         else:
             raise ValueError("unknown request type")
 
@@ -114,9 +121,10 @@ class DamonService:
         chat_id = request.get("chat_id") or self.store.create_chat(message)
         self.store.add_message(chat_id, "user", message)
         run_id: str | None = None
+        error_emitted = False
 
         def persist(event) -> None:
-            nonlocal run_id
+            nonlocal run_id, error_emitted
             if event.type == "RunStarted":
                 run_id = event.run_id
                 self.store.start_run(run_id, chat_id)
@@ -134,6 +142,7 @@ class DamonService:
                 self.store.finish_run(event.run_id, "finished")
                 self.store.add_message(chat_id, "assistant", event.payload["answer"])
             elif event.type == "Error":
+                error_emitted = True
                 self.store.finish_run(event.run_id, "error")
             data = json.loads(event.to_json())
             data["chat_id"] = chat_id
@@ -141,8 +150,10 @@ class DamonService:
 
         try:
             harness.run(message, cwd, persist)
-        except Exception:
+        except Exception as exc:
             if run_id:
+                if not error_emitted:
+                    persist(DamonEvent("Error", run_id, {"message": str(exc)}))
                 self.store.finish_run(run_id, "error")
             raise
         finally:

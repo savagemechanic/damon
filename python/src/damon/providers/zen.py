@@ -64,6 +64,7 @@ class ZenProvider:
             return urlopen(request, timeout=30)
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:2000]
+            detail = detail.replace(self._api_key, "[REDACTED]")
             raise RuntimeError(f"Zen HTTP {exc.code}: {detail}") from exc
 
     def list_models(self) -> list[ModelInfo]:

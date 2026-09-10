@@ -47,11 +47,17 @@ class PythonExecutor:
     def _terminate_group(self) -> None:
         process = self._process
         if process and process.poll() is None:
-            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                return
             try:
                 process.wait(timeout=1)
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
     def run(self, script: Path, cwd: Path, on_stream: StreamCallback | None = None) -> ExecutionResult:
         started = time.monotonic()
@@ -82,12 +88,12 @@ class PythonExecutor:
                         selector.unregister(key.fileobj)
                         continue
                     stream = key.data
-                    text = chunk.decode("utf-8", errors="replace")
-                    if on_stream:
-                        on_stream(stream, text)
                     remaining = self.policy.max_output_bytes - len(captured[stream])
                     if remaining > 0:
-                        captured[stream].extend(chunk[:remaining])
+                        visible = chunk[:remaining]
+                        captured[stream].extend(visible)
+                        if on_stream:
+                            on_stream(stream, visible.decode("utf-8", errors="replace"))
                     if len(chunk) > remaining:
                         truncated = True
                 if process.poll() is not None and not selector.get_map():
