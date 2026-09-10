@@ -63,3 +63,12 @@ Path('removed.txt').unlink()
     assert set(result.changed_files) == {
         "created:created.txt", "modified:existing.txt", "deleted:removed.txt"
     }
+
+
+def test_child_environment_does_not_inherit_arbitrary_credentials(tmp_path, monkeypatch):
+    monkeypatch.setenv("DAMON_TEST_SECRET", "must-not-leak")
+    result = PythonExecutor(sys.executable).run(
+        script(tmp_path, "import os\nprint(os.environ.get('DAMON_TEST_SECRET', 'absent'))"), tmp_path,
+    )
+    assert result.stdout == "absent\n"
+    assert "must-not-leak" not in result.stdout + result.stderr

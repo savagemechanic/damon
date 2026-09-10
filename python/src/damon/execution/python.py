@@ -13,6 +13,7 @@ from .result import ExecutionResult
 
 
 StreamCallback = Callable[[str, str], None]
+_SAFE_ENVIRONMENT = {"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "USER", "LOGNAME", "SHELL"}
 
 
 def _snapshot(root: Path, limit: int) -> tuple[dict[str, tuple[int, int]], bool]:
@@ -58,6 +59,7 @@ class PythonExecutor:
         process = subprocess.Popen(
             [self.executable, "-I", str(script)], cwd=cwd, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, start_new_session=True,
+            env={key: value for key, value in os.environ.items() if key in _SAFE_ENVIRONMENT},
         )
         self._process = process
         if self._cancelled:
