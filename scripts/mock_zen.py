@@ -10,10 +10,12 @@ class Handler(BaseHTTPRequestHandler):
         return
 
     def do_GET(self):
-        if self.path != "/v1/models":
+        if self.path == "/v1/models":
+            self._json({"data": [{"id": "mock-model", "object": "model", "owned_by": "opencode"}]})
+        elif self.path == "/models-metadata":
+            self._json({"opencode": {"models": {"mock-model": {"name": "Mock Model", "reasoning_options": [{"type": "effort", "values": ["low"]}]}}}})
+        else:
             self.send_error(404)
-            return
-        self._json({"data": [{"id": "mock-model", "name": "Mock Model", "reasoning_efforts": ["low"]}]})
 
     def do_POST(self):
         if self.path != "/v1/chat/completions":

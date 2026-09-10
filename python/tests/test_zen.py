@@ -1,4 +1,5 @@
 import json
+import io
 from unittest.mock import patch
 
 import pytest
@@ -15,6 +16,14 @@ class Response:
 
     def __iter__(self):
         return iter([b"data: [DONE]\n"])
+
+
+class JSONResponse(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        self.close()
 
 
 def test_request_serialization_is_model_aware():
@@ -56,3 +65,16 @@ def test_requests_match_current_opencode_identity_envelope():
     assert headers["x-opencode-project"] == "project-1"
     assert headers["x-opencode-request"]
     assert headers["user-agent"] == "damon/0.1.0"
+
+
+def test_model_catalogue_is_enriched_from_current_models_metadata_without_leaking_key():
+    zen = JSONResponse(json.dumps({"data": [{"id": "model-a", "object": "model", "owned_by": "opencode"}]}).encode())
+    metadata = JSONResponse(json.dumps({"opencode": {"models": {"model-a": {
+        "name": "Model A", "reasoning_options": [{"type": "effort", "values": ["low", "high"]}]
+    }}}}).encode())
+    provider = ZenProvider("secret", "https://zen.test/v1", metadata_url="https://models.test/api.json")
+    with patch("damon.providers.zen.urlopen", side_effect=[zen, metadata]) as send:
+        assert provider.list_models() == [ModelInfo("model-a", "Model A", ("low", "high"))]
+
+    metadata_headers = {key.lower(): value for key, value in send.call_args_list[1].args[0].header_items()}
+    assert "authorization" not in metadata_headers

@@ -39,13 +39,15 @@ def parse_sse(lines: Iterable[bytes]) -> Iterable[tuple[str, str]]:
 
 class ZenProvider:
     def __init__(self, api_key: str, base_url: str | None = None,
-                 session_id: str | None = None, project_id: str | None = None):
+                 session_id: str | None = None, project_id: str | None = None,
+                 metadata_url: str | None = None):
         if not api_key:
             raise ValueError("Zen API key is required")
         self._api_key = api_key
         self.base_url = (base_url or os.environ.get("DAMON_ZEN_BASE_URL") or "https://opencode.ai/zen/v1").rstrip("/")
         self.session_id = session_id or str(uuid.uuid4())
         self.project_id = project_id or os.environ.get("OPENCODE_PROJECT_ID")
+        self.metadata_url = metadata_url or os.environ.get("DAMON_MODELS_URL") or "https://models.dev/api.json"
 
     def _request(self, path: str, body: dict | None = None):
         data = None if body is None else json.dumps(body).encode()
@@ -67,15 +69,30 @@ class ZenProvider:
     def list_models(self) -> list[ModelInfo]:
         with self._request("/models") as response:
             payload = json.load(response)
+        metadata = self._model_metadata()
         rows = payload.get("data", payload.get("models", []))
         result = []
         for row in rows:
             model_id = row.get("id") or row.get("name")
             if not model_id:
                 continue
+            details = metadata.get(model_id, {})
             efforts = row.get("reasoning_efforts") or row.get("reasoning", {}).get("efforts", [])
-            result.append(ModelInfo(model_id, row.get("name", model_id), tuple(efforts)))
+            if not efforts:
+                effort = next((option for option in details.get("reasoning_options", []) if option.get("type") == "effort"), {})
+                efforts = effort.get("values", [])
+            result.append(ModelInfo(model_id, row.get("name") or details.get("name", model_id), tuple(efforts)))
         return sorted(result, key=lambda item: item.id)
+
+    def _model_metadata(self) -> dict:
+        try:
+            request = Request(self.metadata_url)
+            request.add_header("User-Agent", "damon/0.1.0")
+            with urlopen(request, timeout=30) as response:
+                payload = json.load(response)
+            return payload.get("opencode", {}).get("models", {})
+        except Exception:
+            return {}
 
     @staticmethod
     def request_body(messages: list[dict], model: ModelInfo, thinking_effort: str | None) -> dict:

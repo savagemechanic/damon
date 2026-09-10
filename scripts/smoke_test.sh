@@ -19,7 +19,7 @@ mock_pid=$!
 for _ in {1..100}; do [[ -f "$temporary/mock-port" ]] && break; sleep 0.1; done
 test -f "$temporary/mock-port"
 mock_port="$(<"$temporary/mock-port")"
-DAMON_ZEN_BASE_URL="http://127.0.0.1:$mock_port/v1" DYLD_FRAMEWORK_PATH="$frameworks" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$temporary/extracted/Damon.app/Contents/Resources/python/src" "$runtime" -m damon.ipc.server --socket "$socket_path" --home "$temporary/home" 2>"$temporary/daemon.stderr" &
+DAMON_ZEN_BASE_URL="http://127.0.0.1:$mock_port/v1" DAMON_MODELS_URL="http://127.0.0.1:$mock_port/models-metadata" DYLD_FRAMEWORK_PATH="$frameworks" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$temporary/extracted/Damon.app/Contents/Resources/python/src" "$runtime" -m damon.ipc.server --socket "$socket_path" --home "$temporary/home" 2>"$temporary/daemon.stderr" &
 daemon_pid=$!
 for _ in {1..200}; do
   [[ -S "$socket_path" ]] && break
