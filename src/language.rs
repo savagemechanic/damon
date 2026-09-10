@@ -12,6 +12,7 @@ pub const INTENT_DEFAULT_GATEWAY: IntentId = IntentId(7);
 pub const INTENT_NETWORK_NEIGHBORS: IntentId = IntentId(8);
 pub const INTENT_NETWORK_DIAGNOSIS: IntentId = IntentId(9);
 pub const INTENT_LIST_SOCKETS: IntentId = IntentId(10);
+pub const INTENT_LOCATE_PYTHON: IntentId = IntentId(11);
 const BEAM_WIDTH: usize = 4;
 
 #[derive(Debug)]
@@ -124,6 +125,14 @@ fn lexical_evidence(text: &str, intent: IntentId) -> i32 {
                 || text.contains("my mac talking to") =>
         {
             165
+        }
+        INTENT_LOCATE_PYTHON
+            if text.contains("python")
+                && (text.contains("executable")
+                    || text.contains("where is")
+                    || text.contains("path")) =>
+        {
+            180
         }
         _ => 0,
     }
@@ -476,6 +485,7 @@ fn understand_single(input: &str, data: &DamonData) -> Interpretation {
         INTENT_NETWORK_NEIGHBORS,
         INTENT_NETWORK_DIAGNOSIS,
         INTENT_LIST_SOCKETS,
+        INTENT_LOCATE_PYTHON,
     ] {
         let evidence = lexical_evidence(&text, intent);
         let prior = learned
@@ -491,6 +501,7 @@ fn understand_single(input: &str, data: &DamonData) -> Interpretation {
                     | INTENT_NETWORK_NEIGHBORS
                     | INTENT_NETWORK_DIAGNOSIS
                     | INTENT_LIST_SOCKETS
+                    | INTENT_LOCATE_PYTHON
             ) {
                 data.resolve("local host").filter(|id| {
                     data.entity(*id)
@@ -571,6 +582,19 @@ mod tests {
             panic!("Wi-Fi question should resolve without a model")
         };
         assert_eq!(meaning.intent, INTENT_NETWORK_INTERFACES);
+        let _ = std::fs::remove_file(p);
+    }
+
+    #[test]
+    fn python_executable_question_stays_on_the_deterministic_system_path() {
+        let p = std::env::temp_dir().join(format!("damon-python-lang-{}.data", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        let d = DamonData::open(&p).unwrap();
+        let Interpretation::Resolved(meaning) = understand("where is the python executable?", &d)
+        else {
+            panic!("Python executable question should resolve without a model")
+        };
+        assert_eq!(meaning.intent, INTENT_LOCATE_PYTHON);
         let _ = std::fs::remove_file(p);
     }
 

@@ -72,7 +72,7 @@ pub fn validate(m: &MeaningGraph, data: &DamonData) -> Result<(), String> {
     }
     for (index, n) in m.nodes.iter().enumerate() {
         match n.kind {
-            NodeKind::Action if (1..=10).contains(&n.value) => {}
+            NodeKind::Action if (1..=11).contains(&n.value) => {}
             NodeKind::Entity
                 if data.entity(EntityId(n.value)).is_some_and(|e| {
                     matches!(e.kind, crate::world::PROJECT | crate::world::HOST)

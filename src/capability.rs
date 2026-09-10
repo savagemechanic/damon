@@ -22,6 +22,7 @@ pub const UDP_EXCHANGE: CapabilityId = CapabilityId(12);
 pub const DIAGNOSE_NETWORK: CapabilityId = CapabilityId(13);
 pub const COPY_FILE: CapabilityId = CapabilityId(14);
 pub const FIND_FILES: CapabilityId = CapabilityId(15);
+pub const LOCATE_PYTHON: CapabilityId = CapabilityId(16);
 const MAX_CAPABILITIES: usize = 4096;
 const MAX_IMPLEMENTATIONS: usize = 8192;
 const MAX_DEPENDENCIES: usize = 16384;
@@ -184,6 +185,12 @@ impl CapabilityGraph {
                 Some(ToolId(11)),
             ),
             (FIND_FILES, "find files", Effects::READ, Some(ToolId(12))),
+            (
+                LOCATE_PYTHON,
+                "locate Python executable",
+                Effects::READ,
+                Some(ToolId(13)),
+            ),
         ] {
             graph.capabilities.push(Capability {
                 id,
@@ -464,6 +471,7 @@ pub fn for_intent(intent: crate::types::IntentId) -> Option<CapabilityId> {
         8 => INSPECT_NEIGHBORS,
         9 => DIAGNOSE_NETWORK,
         10 => LIST_SOCKETS,
+        11 => LOCATE_PYTHON,
         _ => return None,
     })
 }

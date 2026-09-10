@@ -215,7 +215,7 @@ fn successful_teacher_graph_is_reused_with_providers_disabled() {
     models.ollama_model.clear();
     models.allow_cloud = false;
     models.external_command = Some(
-        "printf '%s' '{\"ir_version\":1,\"registry_version\":3,\"candidates\":[{\"nodes\":[{\"kind\":\"ACTION\",\"concept\":16777220,\"value\":0},{\"kind\":\"ENTITY\",\"concept\":67108865,\"value\":0}],\"edges\":[{\"source\":0,\"predicate\":33554433,\"target\":1}]}],\"unresolved_spans\":[]}'".into(),
+        "printf '%s' '{\"ir_version\":1,\"registry_version\":4,\"candidates\":[{\"nodes\":[{\"kind\":\"ACTION\",\"concept\":16777220,\"value\":0},{\"kind\":\"ENTITY\",\"concept\":67108865,\"value\":0}],\"edges\":[{\"source\":0,\"predicate\":33554433,\"target\":1}]}],\"unresolved_spans\":[]}'".into(),
     );
     let mut runtime = damon::Damon {
         data: f.data(),

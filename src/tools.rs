@@ -16,6 +16,7 @@ pub const TOOL_NETWORK_DIAGNOSE: ToolId = ToolId(9);
 pub const TOOL_LIST_SOCKETS: ToolId = ToolId(10);
 pub const TOOL_COPY_FILE: ToolId = ToolId(11);
 pub const TOOL_FIND_FILES: ToolId = ToolId(12);
+pub const TOOL_LOCATE_PYTHON: ToolId = ToolId(13);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandSpec {
@@ -106,6 +107,7 @@ pub fn action_for_capability(
         | TOOL_NETWORK_NEIGHBORS
         | TOOL_NETWORK_DIAGNOSE
         | TOOL_LIST_SOCKETS
+        | TOOL_LOCATE_PYTHON
             if entity.kind == crate::world::HOST =>
         {
             Vec::new()
@@ -136,6 +138,7 @@ pub fn required_effects(tool: ToolId) -> Result<Effects, String> {
         10 => Ok(Effects::READ.union(Effects::PROCESS)),
         11 => Ok(Effects::READ.union(Effects::WRITE)),
         12 => Ok(Effects::READ),
+        13 => Ok(Effects::READ),
         _ => Err("unknown tool".into()),
     }
 }
@@ -153,6 +156,7 @@ pub fn capability_for_tool(tool: ToolId) -> Option<crate::types::CapabilityId> {
         TOOL_LIST_SOCKETS => crate::capability::LIST_SOCKETS,
         TOOL_COPY_FILE => crate::capability::COPY_FILE,
         TOOL_FIND_FILES => crate::capability::FIND_FILES,
+        TOOL_LOCATE_PYTHON => crate::capability::LOCATE_PYTHON,
         _ => return None,
     })
 }
@@ -191,6 +195,7 @@ pub fn execute(action: &Action, policy: &crate::policy::Policy) -> ToolResult {
         TOOL_LIST_SOCKETS => inspect_sockets(),
         TOOL_COPY_FILE => copy_file(action),
         TOOL_FIND_FILES => find_files(action),
+        TOOL_LOCATE_PYTHON => locate_python(),
         _ => ToolResult {
             success: false,
             stdout: String::new(),
@@ -911,6 +916,47 @@ fn list_files(cwd: &str) -> ToolResult {
     }
 }
 
+fn locate_python() -> ToolResult {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    match locate_executable(&path, &["python3", "python"]) {
+        Some(executable) => ToolResult {
+            success: true,
+            stdout: format!("Python executable: {}", executable.display()),
+            stderr: String::new(),
+            code: Some(0),
+        },
+        None => ToolResult {
+            success: false,
+            stdout: String::new(),
+            stderr: "No Python executable was found on PATH.".into(),
+            code: Some(1),
+        },
+    }
+}
+
+fn locate_executable(path: &std::ffi::OsStr, names: &[&str]) -> Option<std::path::PathBuf> {
+    for name in names {
+        for directory in std::env::split_paths(path) {
+            let candidate = directory.join(name);
+            let Ok(metadata) = candidate.metadata() else {
+                continue;
+            };
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0 {
+                    return Some(candidate);
+                }
+            }
+            #[cfg(not(unix))]
+            if metadata.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
 fn changed_files(cwd: &str) -> ToolResult {
     let email = run(cwd, "git", &["config", "user.email"]);
     if !email.success || email.stdout.trim().is_empty() {
@@ -984,5 +1030,29 @@ mod tests {
             lines,
             ["Wi-Fi interface en0 is connected to “Home” (5 GHz, channel 44, signal -48 dBm, link rate 866 Mbps)."]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executable_lookup_prefers_python3_and_requires_execute_permission() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!(
+            "damon-python-tool-{}-{}",
+            std::process::id(),
+            crate::cache::hash_bytes(&[b"python-tool-test"])
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let python = directory.join("python");
+        let python3 = directory.join("python3");
+        std::fs::write(&python, b"#!/bin/sh\n").unwrap();
+        std::fs::write(&python3, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&python3, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            locate_executable(directory.as_os_str(), &["python3", "python"]),
+            Some(python)
+        );
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

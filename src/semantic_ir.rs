@@ -611,6 +611,7 @@ pub fn request(input: &str, data: &DamonData) -> SemanticRequest {
         (registry::INSPECT_NEIGHBORS, ["devices", "neighbors"]),
         (registry::DIAGNOSE_NETWORK, ["internet", "dns"]),
         (registry::LIST_SOCKETS, ["sockets", "talking"]),
+        (registry::LOCATE_PYTHON, ["python", "executable"]),
         (registry::COPY, ["copy", "duplicate"]),
         (registry::FIND, ["find", "larger"]),
     ];
@@ -633,6 +634,7 @@ pub fn request(input: &str, data: &DamonData) -> SemanticRequest {
             registry::INSPECT_NEIGHBORS,
             registry::DIAGNOSE_NETWORK,
             registry::LIST_SOCKETS,
+            registry::LOCATE_PYTHON,
         ]);
     }
     if text.contains("inspect") {
@@ -1096,6 +1098,7 @@ fn validate_requirements(ir: &CandidateIr) -> Result<(), String> {
                         | registry::INSPECT_NEIGHBORS
                         | registry::DIAGNOSE_NETWORK
                         | registry::LIST_SOCKETS
+                        | registry::LOCATE_PYTHON
                 ) && target_kind(registry::TARGET) != Some(registry::HOST) =>
             {
                 return Err("network action target must be a host".into())
