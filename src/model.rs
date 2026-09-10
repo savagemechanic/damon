@@ -3,13 +3,18 @@ use std::{
     io::{BufRead, BufReader, Read, Write},
     net::{TcpStream, ToSocketAddrs},
     path::Path,
-    time::Duration,
+    sync::Mutex,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 const MAX_PROMPT_BYTES: usize = 64 * 1024;
 const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 const MAX_STREAM_BYTES: usize = 8 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(45);
+const OPENCODE_VERSION: &str = "1.18.30";
+const OPENCODE_ID_RANDOM_LENGTH: usize = 14;
+const BASE62: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+static OPENCODE_ID_STATE: Mutex<(u64, u16)> = Mutex::new((0, 0));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderKind {
@@ -40,6 +45,8 @@ pub struct ModelRouter {
     pub zen_model: String,
     pub zen_api_key: Option<String>,
     pub zen_base_url: String,
+    pub zen_session_id: String,
+    pub zen_project_id: Option<String>,
     pub allow_cloud: bool,
 }
 
@@ -55,6 +62,8 @@ impl Default for ModelRouter {
             zen_model: env::var("DAMON_ZEN_MODEL").unwrap_or_else(|_| "big-pickle".into()),
             allow_cloud: zen_api_key.is_some(),
             zen_api_key,
+            zen_session_id: opencode_id("ses", IdDirection::Descending).unwrap_or_default(),
+            zen_project_id: opencode_project_id(env::current_dir().ok().as_deref()),
             zen_base_url: if cfg!(debug_assertions) {
                 env::var("DAMON_ZEN_BASE_URL")
                     .unwrap_or_else(|_| "https://opencode.ai/zen/v1".into())
@@ -223,21 +232,11 @@ impl ModelRouter {
             return Err("selected OpenCode Zen model is not a supported free chat model".into());
         }
         let body = format!(
-            "{{\"model\":{},\"messages\":[{{\"role\":\"user\",\"content\":{}}}],\"temperature\":0,\"stream\":false}}",
+            "{{\"model\":{},\"messages\":[{{\"role\":\"user\",\"content\":{}}}],\"temperature\":0,\"stream\":true,\"stream_options\":{{\"include_usage\":true}}}}",
             crate::json::quoted(&self.zen_model),
             crate::json::quoted(prompt)
         );
-        let text = self.zen_request("POST", "/chat/completions", Some(&body), true)?;
-        let root = crate::json::parse(&text)?;
-        root.get("choices")
-            .and_then(crate::json::Value::as_array)
-            .and_then(|choices| choices.first())
-            .and_then(|choice| choice.get("message"))
-            .and_then(|message| message.get("content"))
-            .and_then(crate::json::Value::as_str)
-            .filter(|answer| !answer.trim().is_empty())
-            .map(str::to_owned)
-            .ok_or_else(|| "OpenCode Zen returned no answer".into())
+        self.zen_request("POST", "/chat/completions", Some(&body), true)
     }
 
     fn zen_request(
@@ -265,10 +264,21 @@ impl ModelRouter {
                     .zen_api_key
                     .as_deref()
                     .ok_or("OpenCode Zen API key is not configured")?;
-                let request = agent
+                let request_id = opencode_id("msg", IdDirection::Ascending)?;
+                if self.zen_session_id.is_empty() {
+                    return Err("cannot generate OpenCode session ID".into());
+                }
+                let mut request = agent
                     .post(&url)
                     .header("Authorization", &format!("Bearer {key}"))
-                    .header("Content-Type", "application/json");
+                    .header("Content-Type", "application/json")
+                    .header("User-Agent", &format!("opencode/{OPENCODE_VERSION}"))
+                    .header("x-opencode-client", "cli")
+                    .header("x-opencode-session", &self.zen_session_id)
+                    .header("x-opencode-request", &request_id);
+                if let Some(project_id) = &self.zen_project_id {
+                    request = request.header("x-opencode-project", project_id);
+                }
                 request.send(body)
             }
             _ => return Err("unsupported Zen request shape".into()),
@@ -276,6 +286,9 @@ impl ModelRouter {
         let mut response =
             response.map_err(|error| format!("OpenCode Zen {operation} failed: {error}"))?;
         let status = response.status();
+        if status.is_success() && authenticate {
+            return zen_answer_from_reader(response.body_mut().as_reader());
+        }
         let text = response
             .body_mut()
             .with_config()
@@ -378,6 +391,133 @@ impl ModelRouter {
         }
         validate(&text).map_err(|error| format!("{provider:?}: {error}"))?;
         Ok(RoutedResponse { provider, text })
+    }
+}
+
+#[derive(Clone, Copy)]
+enum IdDirection {
+    Ascending,
+    Descending,
+}
+
+fn opencode_id(prefix: &str, direction: IdDirection) -> Result<String, String> {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("system clock cannot create OpenCode request ID: {error}"))?
+        .as_millis() as u64;
+    let counter = {
+        let mut state = OPENCODE_ID_STATE
+            .lock()
+            .map_err(|_| "OpenCode request ID state is unavailable")?;
+        if state.0 != timestamp {
+            *state = (timestamp, 0);
+        }
+        state.1 = state.1.saturating_add(1);
+        state.1
+    };
+    let mut random = [0_u8; OPENCODE_ID_RANDOM_LENGTH];
+    getrandom::getrandom(&mut random)
+        .map_err(|error| format!("cannot generate OpenCode request ID: {error}"))?;
+    Ok(opencode_id_from_parts(
+        prefix, direction, timestamp, counter, &random,
+    ))
+}
+
+fn opencode_id_from_parts(
+    prefix: &str,
+    direction: IdDirection,
+    timestamp: u64,
+    counter: u16,
+    random: &[u8; OPENCODE_ID_RANDOM_LENGTH],
+) -> String {
+    let encoded = timestamp.wrapping_mul(0x1000).wrapping_add(counter as u64);
+    let encoded = match direction {
+        IdDirection::Ascending => encoded,
+        IdDirection::Descending => !encoded,
+    } & 0x0000_ffff_ffff_ffff;
+    let suffix = random
+        .iter()
+        .map(|byte| BASE62[usize::from(*byte) % BASE62.len()] as char)
+        .collect::<String>();
+    format!("{prefix}_{encoded:012x}{suffix}")
+}
+
+fn opencode_project_id(start: Option<&Path>) -> Option<String> {
+    if let Ok(id) = env::var("DAMON_OPENCODE_PROJECT_ID") {
+        if valid_opencode_project_id(&id) {
+            return Some(id);
+        }
+    }
+    let mut directory = match start {
+        Some(start) => start.to_path_buf(),
+        None => return Some("global".into()),
+    };
+    loop {
+        let cache = directory.join(".git/opencode");
+        if let Ok(id) = std::fs::read_to_string(cache) {
+            let id = id.trim();
+            if valid_opencode_project_id(id) {
+                return Some(id.to_owned());
+            }
+        }
+        if !directory.pop() {
+            return Some("global".into());
+        }
+    }
+}
+
+fn valid_opencode_project_id(id: &str) -> bool {
+    id == "global" || (id.len() == 40 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
+fn zen_answer_from_reader(reader: impl Read) -> Result<String, String> {
+    let mut answer = String::new();
+    let mut reader = BufReader::new(reader.take((MAX_STREAM_BYTES + 1) as u64));
+    let mut transferred = 0_usize;
+    loop {
+        let mut line = String::new();
+        let count = reader
+            .read_line(&mut line)
+            .map_err(|error| format!("cannot read OpenCode Zen stream: {error}"))?;
+        if count == 0 {
+            break;
+        }
+        transferred = transferred.saturating_add(count);
+        if transferred > MAX_STREAM_BYTES {
+            return Err("OpenCode Zen stream exceeds 8 MiB".into());
+        }
+        let Some(data) = line.strip_prefix("data:").map(str::trim) else {
+            continue;
+        };
+        if data == "[DONE]" {
+            break;
+        }
+        if data.is_empty() {
+            continue;
+        }
+        let row = crate::json::parse(data)
+            .map_err(|error| format!("invalid OpenCode Zen stream row: {error}"))?;
+        if let Some(detail) = zen_error_detail(data) {
+            return Err(format!("OpenCode Zen stream error: {detail}"));
+        }
+        let content = row
+            .get("choices")
+            .and_then(crate::json::Value::as_array)
+            .and_then(|choices| choices.first())
+            .and_then(|choice| choice.get("delta"))
+            .and_then(|delta| delta.get("content"))
+            .and_then(crate::json::Value::as_str);
+        if let Some(content) = content {
+            if answer.len().saturating_add(content.len()) > MAX_RESPONSE_BYTES {
+                return Err("OpenCode Zen answer exceeds 256 KiB".into());
+            }
+            answer.push_str(content);
+        }
+    }
+    if answer.trim().is_empty() {
+        Err("OpenCode Zen returned no answer".into())
+    } else {
+        Ok(answer)
     }
 }
 
@@ -636,6 +776,8 @@ mod tests {
             zen_model: "big-pickle".into(),
             zen_api_key: None,
             zen_base_url: "https://opencode.ai/zen/v1".into(),
+            zen_session_id: "ses_ffffffffffff00000000000000".into(),
+            zen_project_id: Some("675c45d5f7220f30d01d91400e4574b8461820e4".into()),
             allow_cloud: false,
         }
     }
@@ -834,8 +976,23 @@ mod tests {
             assert!(request
                 .to_ascii_lowercase()
                 .contains("authorization: bearer secret-test-key"));
+            assert!(request.contains("user-agent: opencode/1.18.30"));
+            assert!(request.contains("x-opencode-client: cli"));
+            assert!(request.contains("x-opencode-session: ses_ffffffffffff00000000000000"));
+            assert!(request.contains("x-opencode-request: msg_"));
+            assert!(
+                request.contains("x-opencode-project: 675c45d5f7220f30d01d91400e4574b8461820e4")
+            );
             assert!(request.contains("\"model\":\"big-pickle\""));
-            let answer = r#"{"choices":[{"message":{"content":"{\"ok\":true}"}}]}"#;
+            assert!(request.contains("\"stream\":true"));
+            assert!(request.contains("\"stream_options\":{\"include_usage\":true}"));
+            let answer = concat!(
+                ": keep-alive\n\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"ok\\\":\"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\"true}\"}}]}\n\n",
+                "data: [DONE]\n\n",
+                "data: {\"choices\":[],\"cost\":\"0\"}\n\n"
+            );
             write!(
                 socket,
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
@@ -851,6 +1008,31 @@ mod tests {
         let response = model.zen_chat("prompt").unwrap();
         assert_eq!(response, r#"{"ok":true}"#);
         server.join().unwrap();
+    }
+
+    #[test]
+    fn opencode_ids_match_the_source_format_and_direction() {
+        let random = [0_u8; OPENCODE_ID_RANDOM_LENGTH];
+        assert_eq!(
+            opencode_id_from_parts("msg", IdDirection::Ascending, 1, 1, &random),
+            "msg_00000000100100000000000000"
+        );
+        assert_eq!(
+            opencode_id_from_parts("ses", IdDirection::Descending, 1, 1, &random),
+            "ses_ffffffffeffe00000000000000"
+        );
+    }
+
+    #[test]
+    fn zen_stream_parser_uses_content_and_ignores_reasoning_and_cost() {
+        let stream = concat!(
+            ": keep-alive\n\n",
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\",\"content\":null}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\n",
+            "data: [DONE]\n\n",
+            "data: {\"choices\":[],\"cost\":\"0\"}\n\n"
+        );
+        assert_eq!(zen_answer_from_reader(stream.as_bytes()).unwrap(), "OK");
     }
 
     #[test]
