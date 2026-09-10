@@ -6,7 +6,7 @@ import os
 from typing import Iterable
 import uuid
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener
 
 
 @dataclass(frozen=True)
@@ -49,6 +49,13 @@ class ZenProvider:
         self.project_id = project_id or os.environ.get("OPENCODE_PROJECT_ID")
         self.metadata_url = metadata_url or os.environ.get("DAMON_MODELS_URL") or "https://models.dev/api.json"
 
+    @staticmethod
+    def _open(request: Request):
+        # macOS system proxy settings can contain stale or app-specific proxy
+        # endpoints. Zen is an explicit HTTPS destination, so use a direct
+        # transport instead of allowing urllib to inherit those settings.
+        return build_opener(ProxyHandler({})).open(request, timeout=30)
+
     def _request(self, path: str, body: dict | None = None):
         data = None if body is None else json.dumps(body).encode()
         request = Request(self.base_url + path, data=data)
@@ -61,7 +68,7 @@ class ZenProvider:
         if self.project_id:
             request.add_header("x-opencode-project", self.project_id)
         try:
-            return urlopen(request, timeout=30)
+            return self._open(request)
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:2000]
             detail = detail.replace(self._api_key, "[REDACTED]")
@@ -89,7 +96,7 @@ class ZenProvider:
         try:
             request = Request(self.metadata_url)
             request.add_header("User-Agent", "damon/0.1.0")
-            with urlopen(request, timeout=30) as response:
+            with self._open(request) as response:
                 payload = json.load(response)
             return payload.get("opencode", {}).get("models", {})
         except Exception:

@@ -1,6 +1,6 @@
 import json
 import io
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -53,10 +53,11 @@ def test_sse_parser_rejects_bad_json():
 
 def test_requests_match_current_opencode_identity_envelope():
     provider = ZenProvider("secret", "https://example.test/v1", session_id="session-1", project_id="project-1")
-    with patch("damon.providers.zen.urlopen", return_value=Response()) as send:
+    with patch("damon.providers.zen.build_opener") as build:
+        build.return_value.open.return_value = Response()
         list(provider.stream_chat([], ModelInfo("model-a", "Model A")))
 
-    request = send.call_args.args[0]
+    request = build.return_value.open.call_args.args[0]
     headers = {key.lower(): value for key, value in request.header_items()}
     assert request.full_url == "https://example.test/v1/chat/completions"
     assert headers["authorization"] == "Bearer secret"
@@ -67,14 +68,27 @@ def test_requests_match_current_opencode_identity_envelope():
     assert headers["user-agent"] == "damon/0.1.0"
 
 
+def test_zen_transport_bypasses_broken_system_proxy_settings():
+    opener = Mock()
+    opener.open.return_value = Response()
+    with patch("damon.providers.zen.build_opener", return_value=opener) as build:
+        provider = ZenProvider("secret", "https://example.test/v1")
+        list(provider.stream_chat([], ModelInfo("model-a", "Model A")))
+
+    handler = build.call_args.args[0]
+    assert handler.proxies == {}
+    opener.open.assert_called_once()
+
+
 def test_model_catalogue_is_enriched_from_current_models_metadata_without_leaking_key():
     zen = JSONResponse(json.dumps({"data": [{"id": "model-a", "object": "model", "owned_by": "opencode"}]}).encode())
     metadata = JSONResponse(json.dumps({"opencode": {"models": {"model-a": {
         "name": "Model A", "reasoning_options": [{"type": "effort", "values": ["low", "high"]}]
     }}}}).encode())
     provider = ZenProvider("secret", "https://zen.test/v1", metadata_url="https://models.test/api.json")
-    with patch("damon.providers.zen.urlopen", side_effect=[zen, metadata]) as send:
+    with patch("damon.providers.zen.build_opener") as build:
+        build.return_value.open.side_effect = [zen, metadata]
         assert provider.list_models() == [ModelInfo("model-a", "Model A", ("low", "high"))]
 
-    metadata_headers = {key.lower(): value for key, value in send.call_args_list[1].args[0].header_items()}
+    metadata_headers = {key.lower(): value for key, value in build.return_value.open.call_args_list[1].args[0].header_items()}
     assert "authorization" not in metadata_headers

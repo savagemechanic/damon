@@ -12,7 +12,11 @@ cleanup() {
   fi
   if [[ -n "${daemon_pid:-}" ]]; then kill "$daemon_pid" 2>/dev/null || true; wait "$daemon_pid" 2>/dev/null || true; fi
   if [[ -n "${mock_pid:-}" ]]; then kill "$mock_pid" 2>/dev/null || true; wait "$mock_pid" 2>/dev/null || true; fi
-  rm -rf "$temporary"
+  if [[ "${DAMON_KEEP_SMOKE_TEMP:-0}" == "1" ]]; then
+    echo "preserved smoke directory: $temporary" >&2
+  else
+    rm -rf "$temporary"
+  fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -22,12 +26,14 @@ stage="extract"
 ditto -x -k "$root/dist/Damon-v0.1.0-macos-arm64.zip" "$temporary/extracted"
 test -x "$temporary/extracted/Damon.app/Contents/MacOS/Damon"
 test -f "$temporary/extracted/Damon.app/Contents/Resources/python/src/damon/harness.py"
+stage="initial signature verification"
+codesign --verify --deep --strict "$temporary/extracted/Damon.app"
 frameworks="$temporary/extracted/Damon.app/Contents/Resources/Frameworks"
 runtime="$(find "$frameworks/Python.framework/Versions" -type f -path '*/bin/python3.*' ! -name '*-config' | head -1)"
 test -x "$runtime"
-DYLD_FRAMEWORK_PATH="$frameworks" "$runtime" --version
+DYLD_FRAMEWORK_PATH="$frameworks" PYTHONDONTWRITEBYTECODE=1 "$runtime" --version
 stage="mock readiness"
-DYLD_FRAMEWORK_PATH="$frameworks" "$runtime" "$root/scripts/mock_zen.py" --port-file "$temporary/mock-port" &
+DYLD_FRAMEWORK_PATH="$frameworks" PYTHONDONTWRITEBYTECODE=1 "$runtime" "$root/scripts/mock_zen.py" --port-file "$temporary/mock-port" &
 mock_pid=$!
 for _ in {1..300}; do
   [[ -f "$temporary/mock-port" ]] && break
