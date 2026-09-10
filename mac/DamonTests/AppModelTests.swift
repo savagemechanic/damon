@@ -57,3 +57,8 @@ private final class MemorySecrets: SecretStore {
     #expect(secrets.value == nil)
     #expect(settings.apiKey.isEmpty)
 }
+
+@Test func keychainDefaultsStayOnProductionServiceBoundary() {
+    #expect(KeychainStore(service: "test-service").service == "test-service")
+    #expect(KeychainStore(service: "test-service").account == "opencode-zen-api-key")
+}

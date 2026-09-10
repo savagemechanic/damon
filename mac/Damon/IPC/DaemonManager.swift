@@ -3,7 +3,8 @@ import Foundation
 @MainActor
 final class DaemonManager {
     private var process: Process?
-    let socketPath = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".damon/damon.sock").path
+    private let homePath = ProcessInfo.processInfo.environment["DAMON_HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: ".damon").path
+    var socketPath: String { URL(fileURLWithPath: homePath).appending(path: "damon.sock").path }
 
     func start() throws {
         if process?.isRunning == true { return }
@@ -20,14 +21,14 @@ final class DaemonManager {
         let candidates = [bundled, "/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"].compactMap { $0 }
         guard let python = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { throw IPCError.disconnected }
         task.executableURL = URL(fileURLWithPath: python)
-        task.arguments = ["-m", "damon.ipc.server", "--socket", socketPath]
+        task.arguments = ["-m", "damon.ipc.server", "--socket", socketPath, "--home", homePath]
         var environment = ProcessInfo.processInfo.environment
         environment["PYTHONPATH"] = source
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
         if bundled != nil { environment["DYLD_FRAMEWORK_PATH"] = frameworks.path }
         task.environment = environment
         task.standardOutput = FileHandle.nullDevice
-        let logURL = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".damon/daemon.log")
+        let logURL = URL(fileURLWithPath: homePath).appending(path: "daemon.log")
         try FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         if !FileManager.default.fileExists(atPath: logURL.path) { FileManager.default.createFile(atPath: logURL.path, contents: nil) }
         task.standardError = try FileHandle(forWritingTo: logURL)

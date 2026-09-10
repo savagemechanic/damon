@@ -7,8 +7,13 @@ protocol SecretStore { func read() throws -> String?; func set(_ value: String) 
 enum KeychainError: Error { case status(OSStatus) }
 
 struct KeychainStore: SecretStore, @unchecked Sendable {
-    let service = "com.savagemechanic.damon"
-    let account = "opencode-zen-api-key"
+    let service: String
+    let account: String
+
+    init(service: String? = nil, account: String = "opencode-zen-api-key") {
+        self.service = service ?? ProcessInfo.processInfo.environment["DAMON_KEYCHAIN_SERVICE"] ?? "com.savagemechanic.damon"
+        self.account = account
+    }
 
     private var query: [String: Any] { [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account] }
 
