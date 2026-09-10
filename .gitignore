@@ -10,3 +10,4 @@ build/
 *.db
 .DS_Store
 target/
+**/.build/

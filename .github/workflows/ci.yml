@@ -23,3 +23,13 @@ jobs:
         run: python -m pytest -q python/tests
       - name: Compile Python harness
         run: python -m compileall -q python/src
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift tests
+        run: ./scripts/swift_test.sh
+      - name: Build native app
+        run: ./scripts/build_release.sh
+      - name: Packaged smoke test
+        run: ./scripts/smoke_test.sh

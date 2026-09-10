@@ -73,3 +73,7 @@ def main() -> None:
     server.start()
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.close).start())
     server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

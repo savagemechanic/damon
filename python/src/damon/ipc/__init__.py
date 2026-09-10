@@ -1,3 +1,1 @@
-from .server import DamonServer
-
-__all__ = ["DamonServer"]
+"""Unix-domain socket IPC."""
