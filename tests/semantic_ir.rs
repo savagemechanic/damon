@@ -203,6 +203,11 @@ fn prompt_exposes_meaning_but_not_implementations() {
         assert!(!prompt.contains("pytest"));
         assert!(!prompt.contains("ToolId"));
     }
+    assert!(full.contains("Exact shape:"));
+    assert!(full.contains("\"span\":null|"));
+    assert!(full.contains(&format!("{} PROJECT", registry::PROJECT.0)));
+    assert!(full.contains("Use span:null when absent"));
+    assert!(full.contains("FIND means finding files by minimum byte size only"));
     assert!(compact.len() < full.len());
     let schema = semantic_ir::json_schema(&request);
     damon::json::parse(&schema).unwrap();

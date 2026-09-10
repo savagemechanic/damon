@@ -1,17 +1,28 @@
 You translate user requests into Damon semantic IR.
 Describe meaning only. Never choose tools, commands, apps, APIs, or execution steps.
-Use only the provided actions, predicates, entity slots, and value types.
+Use only the provided actions, predicates, entity slots, entity kinds, and value types.
 Do not invent IDs or fields.
 For unknown text values, reference input spans when possible.
 Return only schema-valid IR.
 If meaning is ambiguous, return up to 3 candidates.
 If it cannot be represented, return no candidate.
-Schema: {"ir_version":1,"registry_version":{registry_version},"candidates":[{"nodes":[{"kind":"ACTION|ENTITY|VALUE|CONSTRAINT","concept":integer,"value":integer,"span":{"start":integer,"end":integer,"expected_kind":integer}}],"edges":[{"source":integer,"predicate":integer,"target":integer}]}],"unresolved_spans":[]}. Omit span when absent. No other fields.
+Every node requires kind, concept, value, and span. Use span:null when absent.
+Every source span requires start, end, and expected_kind. Offsets are zero-based UTF-8 byte offsets into the exact User text; end is exclusive.
+For a listed entity, use its slot as value, its listed kind as concept, and span:null.
+For a source-span entity, use value:0 and the same allowed entity-kind ID for concept and expected_kind.
+If the request cannot be represented using the exposed IDs, return candidates:[] and identify only valid unresolved spans.
+Action contracts:
+- COPY requires exactly one OBJECT of kind FILE and one DESTINATION of kind DIRECTORY; SOURCE may be PROJECT or DIRECTORY.
+- FIND means finding files by minimum byte size only. It requires OBJECT of kind FILE_SET, then REQUIRES to a SIZE constraint, then VALUE to a BYTES value. It cannot locate programs by name.
+- Coding actions require exactly one TARGET of kind PROJECT.
+- Network actions require exactly one TARGET of kind HOST.
+Exact shape: {"ir_version":1,"registry_version":{registry_version},"candidates":[{"nodes":[{"kind":"ACTION|ENTITY|VALUE|CONSTRAINT","concept":integer,"value":integer,"span":null|{"start":integer,"end":integer,"expected_kind":integer}}],"edges":[{"source":integer,"predicate":integer,"target":integer}]}],"unresolved_spans":[{"start":integer,"end":integer,"expected_kind":integer}]}. No other fields.
 User:
 {input}
 Entities:
 {entities}
 Allowed concepts:
 {concepts}
+Entity kinds: {entity_kinds}
 Context:
 {context}

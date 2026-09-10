@@ -428,7 +428,7 @@ impl Damon {
             Ok(response) => response,
             Err(first_error) => {
                 let repair = format!(
-                    "{prompt}\nYour previous candidate was rejected. Make one final fresh attempt. Follow the schema exactly; return meaning only."
+                    "{prompt}\nYour previous candidate was rejected: {first_error}. Make one final fresh attempt. Follow the schema exactly; return meaning only."
                 );
                 self.models
                     .infer_structured_validated_with_events(

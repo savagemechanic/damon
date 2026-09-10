@@ -1443,6 +1443,12 @@ pub fn prompt(request: &SemanticRequest, compact: bool) -> String {
         .filter_map(|id| registry::name(*id).map(|name| format!("{} {name}", id.0)))
         .collect::<Vec<_>>()
         .join("; ");
+    let entity_kinds = request
+        .allowed_entity_kinds
+        .iter()
+        .filter_map(|id| registry::name(*id).map(|name| format!("{} {name}", id.0)))
+        .collect::<Vec<_>>()
+        .join("; ");
     let predicates = request
         .allowed_predicates
         .iter()
@@ -1475,6 +1481,7 @@ pub fn prompt(request: &SemanticRequest, compact: bool) -> String {
             "{concepts}",
             &format!("Actions: {actions}\nPredicates: {predicates}"),
         )
+        .replace("{entity_kinds}", &entity_kinds)
         .replace(
             "{context}",
             &format!(

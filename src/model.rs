@@ -11,6 +11,7 @@ const MAX_PROMPT_BYTES: usize = 64 * 1024;
 const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 const MAX_STREAM_BYTES: usize = 8 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(45);
+const ZEN_TIMEOUT: Duration = Duration::from_secs(90);
 const OPENCODE_VERSION: &str = "1.18.30";
 const OPENCODE_ID_RANDOM_LENGTH: usize = 14;
 const BASE62: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -248,7 +249,7 @@ impl ModelRouter {
     ) -> Result<String, String> {
         let url = format!("{}{path}", self.zen_base_url.trim_end_matches('/'));
         let config = ureq::Agent::config_builder()
-            .timeout_global(Some(TIMEOUT))
+            .timeout_global(Some(ZEN_TIMEOUT))
             .http_status_as_error(false)
             .build();
         let agent: ureq::Agent = config.into();
