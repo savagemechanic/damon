@@ -16,13 +16,17 @@ test -x "$runtime"
 DYLD_FRAMEWORK_PATH="$frameworks" "$runtime" --version
 python3 "$root/scripts/mock_zen.py" --port-file "$temporary/mock-port" &
 mock_pid=$!
-for _ in {1..50}; do [[ -f "$temporary/mock-port" ]] && break; sleep 0.05; done
+for _ in {1..100}; do [[ -f "$temporary/mock-port" ]] && break; sleep 0.1; done
 test -f "$temporary/mock-port"
 mock_port="$(<"$temporary/mock-port")"
-DAMON_ZEN_BASE_URL="http://127.0.0.1:$mock_port/v1" DYLD_FRAMEWORK_PATH="$frameworks" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$temporary/extracted/Damon.app/Contents/Resources/python/src" "$runtime" -m damon.ipc.server --socket "$socket_path" --home "$temporary/home" &
+DAMON_ZEN_BASE_URL="http://127.0.0.1:$mock_port/v1" DYLD_FRAMEWORK_PATH="$frameworks" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$temporary/extracted/Damon.app/Contents/Resources/python/src" "$runtime" -m damon.ipc.server --socket "$socket_path" --home "$temporary/home" 2>"$temporary/daemon.stderr" &
 daemon_pid=$!
-for _ in {1..50}; do [[ -S "$socket_path" ]] && break; sleep 0.05; done
-test -S "$socket_path"
+for _ in {1..200}; do
+  [[ -S "$socket_path" ]] && break
+  if ! kill -0 "$daemon_pid" 2>/dev/null; then cat "$temporary/daemon.stderr" >&2; exit 1; fi
+  sleep 0.1
+done
+if [[ ! -S "$socket_path" ]]; then cat "$temporary/daemon.stderr" >&2; echo "daemon socket readiness timed out" >&2; exit 1; fi
 SOCKET_PATH="$socket_path" WORK_PATH="$temporary" python3 - <<'PY'
 import json, os, socket
 def request(value):
