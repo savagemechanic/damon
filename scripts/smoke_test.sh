@@ -14,7 +14,7 @@ frameworks="$temporary/extracted/Damon.app/Contents/Resources/Frameworks"
 runtime="$(find "$frameworks/Python.framework/Versions" -type f -path '*/bin/python3.*' ! -name '*-config' | head -1)"
 test -x "$runtime"
 DYLD_FRAMEWORK_PATH="$frameworks" "$runtime" --version
-DYLD_FRAMEWORK_PATH="$frameworks" PYTHONPATH="$temporary/extracted/Damon.app/Contents/Resources/python/src" "$runtime" -m damon.ipc.server --socket "$socket_path" &
+DYLD_FRAMEWORK_PATH="$frameworks" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$temporary/extracted/Damon.app/Contents/Resources/python/src" "$runtime" -m damon.ipc.server --socket "$socket_path" &
 daemon_pid=$!
 for _ in {1..50}; do [[ -S "$socket_path" ]] && break; sleep 0.05; done
 test -S "$socket_path"
