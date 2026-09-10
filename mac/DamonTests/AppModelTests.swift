@@ -29,3 +29,28 @@ private func event(_ type: String, _ payload: [String: JSONValue] = [:]) -> Damo
     selection.effortOptions = ["low", "high"]
     #expect(selection.supportsThinkingEffort)
 }
+
+@Test func ipcRejectsOverlongUnixSocketPath() async {
+    let client = UnixSocketClient(path: String(repeating: "x", count: 200))
+    await #expect(throws: IPCError.pathTooLong) {
+        _ = try await client.request(IPCRequest(type: "ping"))
+    }
+}
+
+private final class MemorySecrets: SecretStore {
+    var value: String?
+    func read() throws -> String? { value }
+    func set(_ value: String) throws { self.value = value }
+    func delete() throws { value = nil }
+}
+
+@MainActor @Test func settingsUseSecretStoreBoundary() throws {
+    let secrets = MemorySecrets()
+    let settings = SettingsModel(secrets: secrets)
+    settings.apiKey = "secret"
+    try settings.saveKey()
+    #expect(secrets.value == "secret")
+    try settings.deleteKey()
+    #expect(secrets.value == nil)
+    #expect(settings.apiKey.isEmpty)
+}

@@ -1,15 +1,18 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @ObservedObject var model: AppModel
     @StateObject private var settings = SettingsModel()
+    private var efforts: [String] { model.models.first(where: { $0.id == model.selectedModel })?.reasoningEfforts ?? [] }
     var body: some View {
         TabView {
             Form {
                 SecureField("API key", text: $settings.apiKey)
-                HStack { Button("Save") { try? settings.saveKey() }; Button("Delete", role: .destructive) { try? settings.deleteKey() }; Button("Test Connection") { } }
-                Picker("Model", selection: $settings.selectedModel) { ForEach(settings.models, id: \.self) { Text($0) } }
-                Picker("Thinking effort", selection: $settings.thinkingEffort) { ForEach(settings.effortOptions, id: \.self) { Text($0) } }.disabled(!settings.thinkingEnabled)
-                Text(settings.connectionMessage).foregroundStyle(.secondary)
+                HStack { Button("Save") { try? settings.saveKey(); model.reloadConfiguration() }; Button("Delete", role: .destructive) { try? settings.deleteKey() }; Button("Test Connection") { model.reloadConfiguration() } }
+                Picker("Model", selection: $model.selectedModel) { ForEach(model.models, id: \.id) { Text($0.name).tag($0.id) } }
+                    .onChange(of: model.selectedModel) { _, value in UserDefaults.standard.set(value, forKey: "selectedModel") }
+                Picker("Thinking effort", selection: $settings.thinkingEffort) { ForEach(efforts, id: \.self) { Text($0) } }.disabled(efforts.isEmpty)
+                Text(model.conversation.status).foregroundStyle(.secondary)
             }.padding().tabItem { Label("Model", systemImage: "brain") }
             Form { TextEditor(text: $settings.systemPrompt).font(.system(.body, design: .monospaced)) }.padding().tabItem { Label("Prompt", systemImage: "text.quote") }
             Form { TextField("Python executable", text: $settings.pythonExecutable); Stepper("Max turns: \(settings.maxTurns)", value: $settings.maxTurns, in: 1...32); Stepper("Timeout: \(Int(settings.executionTimeout))s", value: $settings.executionTimeout, in: 1...600) }.padding().tabItem { Label("Runtime", systemImage: "terminal") }

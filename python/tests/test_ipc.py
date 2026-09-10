@@ -23,5 +23,5 @@ def test_unix_socket_ping_and_error_recovery():
                 assert json.loads(stream.readline())["type"] == "error"
                 assert json.loads(stream.readline()) == {"type": "pong", "protocol": 1}
         finally:
-            server._server.shutdown()
+            server.shutdown()
             server.close()

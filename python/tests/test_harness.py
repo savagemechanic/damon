@@ -11,7 +11,7 @@ from damon.providers.zen import ModelInfo
 
 class Provider:
     def __init__(self, responses): self.responses = iter(responses); self.messages = []
-    def stream_chat(self, messages, model):
+    def stream_chat(self, messages, model, thinking_effort=None):
         self.messages.append(list(messages))
         yield "text", next(self.responses)
 

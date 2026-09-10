@@ -23,8 +23,12 @@ struct ConversationView: View {
             }
             Divider()
             HStack {
-                TextField("Ask Damon…", text: $model.input, axis: .vertical).lineLimit(1...5)
-                Button("Send") { }.keyboardShortcut(.return, modifiers: .command).disabled(model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                TextField("Ask Damon…", text: $model.input, axis: .vertical)
+                    .lineLimit(1...5)
+                    .onSubmit { model.send() }
+                Button("Send") { model.send() }
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .disabled(model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.isConnected || model.selectedModel.isEmpty)
             }.padding()
         }
     }

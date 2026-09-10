@@ -8,38 +8,43 @@ import socketserver
 import threading
 from typing import Callable
 
+from .service import DamonService
+
 
 class RequestHandler(socketserver.StreamRequestHandler):
+    def send_response(self, response: dict) -> None:
+        self.wfile.write(json.dumps(response, separators=(",", ":")).encode() + b"\n")
+        self.wfile.flush()
+
     def handle(self) -> None:
         for raw in self.rfile:
             try:
                 request = json.loads(raw)
-                response = self.server.dispatch(request)  # type: ignore[attr-defined]
+                self.server.dispatch(request, self.send_response)  # type: ignore[attr-defined]
             except Exception as exc:
-                response = {"type": "error", "message": f"{type(exc).__name__}: {exc}"}
-            self.wfile.write(json.dumps(response, separators=(",", ":")).encode() + b"\n")
-            self.wfile.flush()
+                self.send_response({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
 
 
 class _UnixServer(socketserver.ThreadingUnixStreamServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, path: str, dispatch: Callable[[dict], dict]):
+    def __init__(self, path: str, dispatch: Callable[[dict, Callable[[dict], None]], None]):
         self.dispatch = dispatch
         super().__init__(path, RequestHandler)
 
 
 class DamonServer:
-    def __init__(self, socket_path: Path, dispatch: Callable[[dict], dict] | None = None):
+    def __init__(self, socket_path: Path, dispatch: Callable[[dict, Callable[[dict], None]], None] | None = None):
         self.socket_path = socket_path
         self.dispatch = dispatch or self._dispatch
         self._server: _UnixServer | None = None
 
     @staticmethod
-    def _dispatch(request: dict) -> dict:
+    def _dispatch(request: dict, emit: Callable[[dict], None]) -> None:
         if request.get("type") == "ping":
-            return {"type": "pong", "protocol": 1}
+            emit({"type": "pong", "protocol": 1})
+            return
         raise ValueError("unknown request type")
 
     def start(self) -> None:
@@ -64,14 +69,18 @@ class DamonServer:
         if self.socket_path.exists():
             self.socket_path.unlink()
 
+    def shutdown(self) -> None:
+        if self._server:
+            self._server.shutdown()
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Damon local daemon")
     parser.add_argument("--socket", type=Path, default=Path.home() / ".damon/damon.sock")
     args = parser.parse_args()
-    server = DamonServer(args.socket)
+    server = DamonServer(args.socket, DamonService(Path.home() / ".damon").dispatch)
     server.start()
-    signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.close).start())
+    signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown).start())
     server.serve_forever()
 
 

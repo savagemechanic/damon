@@ -5,7 +5,7 @@ final class SettingsModel: ObservableObject {
     @AppStorage("selectedModel") var selectedModel = ""
     @AppStorage("thinkingEffort") var thinkingEffort = ""
     @AppStorage("systemPrompt") var systemPrompt = "You are the reasoning engine inside Damon. Inspect before modifying; emit minimal Python actions and finish only with evidence."
-    @AppStorage("pythonExecutable") var pythonExecutable = "/usr/bin/python3"
+    @AppStorage("pythonExecutable") var pythonExecutable = "python3"
     @AppStorage("maxTurns") var maxTurns = 8
     @AppStorage("executionTimeout") var executionTimeout = 60.0
     @AppStorage("reasoningVisibility") var reasoningVisibility = true
@@ -18,7 +18,11 @@ final class SettingsModel: ObservableObject {
 
     init(secrets: SecretStore = KeychainStore()) {
         self.secrets = secrets
-        apiKey = (try? secrets.read()) ?? ""
+        if let store = secrets as? KeychainStore {
+            Task { apiKey = (try? await Task.detached { try store.read() }.value) ?? "" }
+        } else {
+            apiKey = (try? secrets.read()) ?? ""
+        }
     }
 
     var thinkingEnabled: Bool { !effortOptions.isEmpty }

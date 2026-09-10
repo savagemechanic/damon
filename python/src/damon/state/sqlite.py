@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from datetime import datetime, timezone
+import uuid
 
 
 SCHEMA = """
@@ -30,3 +32,32 @@ class DamonStore:
 
     def list_events(self, run_id: str):
         return self.connection.execute("SELECT * FROM events WHERE run_id=? ORDER BY id", (run_id,)).fetchall()
+
+    def create_chat(self, title: str) -> str:
+        chat_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        self.connection.execute("INSERT INTO chats(id,title,created_at) VALUES(?,?,?)", (chat_id, title[:120], now))
+        self.connection.commit()
+        return chat_id
+
+    def add_message(self, chat_id: str, role: str, content: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        self.connection.execute("INSERT INTO messages(chat_id,role,content,created_at) VALUES(?,?,?,?)", (chat_id, role, content, now))
+        self.connection.commit()
+
+    def start_run(self, run_id: str, chat_id: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        self.connection.execute("INSERT INTO runs(id,chat_id,status,created_at) VALUES(?,?,?,?)", (run_id, chat_id, "running", now))
+        self.connection.commit()
+
+    def finish_run(self, run_id: str, status: str) -> None:
+        self.connection.execute("UPDATE runs SET status=? WHERE id=?", (status, run_id))
+        self.connection.commit()
+
+    def list_chats(self) -> list[dict]:
+        rows = self.connection.execute("SELECT * FROM chats ORDER BY created_at DESC").fetchall()
+        return [dict(row) for row in rows]
+
+    def chat_messages(self, chat_id: str) -> list[dict]:
+        rows = self.connection.execute("SELECT role,content,created_at FROM messages WHERE chat_id=? ORDER BY id", (chat_id,)).fetchall()
+        return [dict(row) for row in rows]

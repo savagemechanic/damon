@@ -17,7 +17,7 @@ EventSink = Callable[[DamonEvent], None]
 
 class Harness:
     def __init__(self, provider, model, executor: PythonExecutor, script_store: ScriptStore,
-                 system_prompt: str, max_turns: int = 8):
+                 system_prompt: str, max_turns: int = 8, thinking_effort: str | None = None):
         if max_turns <= 0:
             raise ValueError("max_turns must be positive")
         self.provider = provider
@@ -26,6 +26,7 @@ class Harness:
         self.script_store = script_store
         self.system_prompt = system_prompt
         self.max_turns = max_turns
+        self.thinking_effort = thinking_effort
 
     def run(self, request: str, cwd: Path, emit: EventSink) -> str:
         run_id = str(uuid.uuid4())
@@ -34,7 +35,7 @@ class Harness:
         for turn in range(1, self.max_turns + 1):
             emit(DamonEvent("ModelStarted", run_id, {"turn": turn, "model": self.model.id}))
             response = []
-            for kind, delta in self.provider.stream_chat(messages, self.model):
+            for kind, delta in self.provider.stream_chat(messages, self.model, self.thinking_effort):
                 response.append(delta) if kind == "text" else None
                 emit(DamonEvent("ReasoningDelta" if kind == "reasoning" else "TextDelta", run_id, {"delta": delta}))
             text = "".join(response)

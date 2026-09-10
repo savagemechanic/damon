@@ -1,11 +1,12 @@
 import Foundation
+import LocalAuthentication
 import Security
 
 protocol SecretStore { func read() throws -> String?; func set(_ value: String) throws; func delete() throws }
 
 enum KeychainError: Error { case status(OSStatus) }
 
-struct KeychainStore: SecretStore {
+struct KeychainStore: SecretStore, @unchecked Sendable {
     let service = "com.savagemechanic.damon"
     let account = "opencode-zen-api-key"
 
@@ -15,6 +16,9 @@ struct KeychainStore: SecretStore {
         var request = query
         request[kSecReturnData as String] = true
         request[kSecMatchLimit as String] = kSecMatchLimitOne
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        request[kSecUseAuthenticationContext as String] = context
         var result: CFTypeRef?
         let status = SecItemCopyMatching(request as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }

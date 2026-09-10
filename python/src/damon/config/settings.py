@@ -14,7 +14,7 @@ class Settings:
     model: str = ""
     thinking_effort: str | None = None
     system_prompt: str = DEFAULT_PROMPT
-    python_executable: str = sys.executable
+    python_executable: str = "python3"
     tools_directory: str = ""
     max_turns: int = 8
     execution_timeout: float = 60.0
