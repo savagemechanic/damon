@@ -18,11 +18,13 @@ struct ConversationState: Equatable, Sendable {
     var duration: Double?
     var exitCode: Int?
     var scriptPath: String?
+    var runId: String?
     var changedFiles: [String] = []
     var error: String?
 
     mutating func apply(_ event: DamonEvent) {
         switch event.type {
+        case "RunStarted": runId = event.runId
         case "ModelStarted": status = "Generating"
         case "ReasoningDelta": reasoning += event.payload["delta"]?.string ?? ""
         case "TextDelta": answer += event.payload["delta"]?.string ?? ""
@@ -126,9 +128,12 @@ final class AppModel: ObservableObject {
 
     func promoteCurrentScript() {
         guard let path = conversation.scriptPath else { return }
+        let runId = conversation.runId ?? "unknown"
+        let baseName = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        let toolName = "\(runId.prefix(8))-\(baseName)"
         Task { @MainActor in
             do {
-                _ = try await client.request(IPCRequest(type: "promote", path: path, name: URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent, description: "Saved from a Damon run", category: "misc"))
+                _ = try await client.request(IPCRequest(type: "promote", model: selectedModel, path: path, name: toolName, description: "Saved from a Damon run", category: "misc", runId: runId))
                 let lines = try await client.request(IPCRequest(type: "tools"))
                 tools = try JSONDecoder().decode(IPCResponse.self, from: lines[0]).tools ?? []
                 sidebarSelection = "tools"

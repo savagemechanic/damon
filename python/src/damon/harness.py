@@ -47,13 +47,17 @@ class Harness:
             assert isinstance(action, PythonAction)
             emit(DamonEvent("PythonDetected", run_id, {"source": action.source, "turn": turn}))
             path, metadata = self.script_store.save(run_id, turn, action.source, self.model.id)
-            emit(DamonEvent("ScriptSaved", run_id, {"path": str(path), "script_id": metadata["id"]}))
+            emit(DamonEvent("ScriptSaved", run_id, {
+                "path": str(path), "script_id": metadata["id"], "turn": turn,
+                "source_hash": metadata["source_hash"], "model": self.model.id,
+                "created_at": metadata["created_at"], "reusable_status": metadata["reusable_status"],
+            }))
             emit(DamonEvent("ExecutionStarted", run_id, {"script_id": metadata["id"]}))
             result = self.executor.run(path, cwd, lambda stream, delta: emit(
                 DamonEvent("StdoutDelta" if stream == "stdout" else "StderrDelta", run_id, {"delta": delta})
             ))
             self.script_store.record_result(run_id, metadata["id"], result.exit_code, result.duration)
-            emit(DamonEvent("ExecutionFinished", run_id, asdict(result)))
+            emit(DamonEvent("ExecutionFinished", run_id, {**asdict(result), "script_id": metadata["id"]}))
             if result.cancelled:
                 emit(DamonEvent("Error", run_id, {"message": "run cancelled"}))
                 return ""

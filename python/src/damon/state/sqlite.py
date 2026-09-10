@@ -71,3 +71,22 @@ class DamonStore:
         with self.lock:
             rows = self.connection.execute("SELECT role,content,created_at FROM messages WHERE chat_id=? ORDER BY id", (chat_id,)).fetchall()
         return [dict(row) for row in rows]
+
+    def add_script(self, run_id: str, payload: dict) -> None:
+        with self.lock:
+            self.connection.execute(
+                "INSERT INTO scripts(id,run_id,turn,path,source_hash,model,created_at,reusable_status) VALUES(?,?,?,?,?,?,?,?)",
+                (payload["script_id"], run_id, payload["turn"], payload["path"], payload["source_hash"],
+                 payload["model"], payload["created_at"], payload["reusable_status"]),
+            )
+            self.connection.commit()
+
+    def finish_script(self, script_id: str, exit_code: int | None, duration: float) -> None:
+        with self.lock:
+            self.connection.execute("UPDATE scripts SET exit_code=?,duration=? WHERE id=?", (exit_code, duration, script_id))
+            self.connection.commit()
+
+    def list_scripts(self, run_id: str) -> list[dict]:
+        with self.lock:
+            rows = self.connection.execute("SELECT * FROM scripts WHERE run_id=? ORDER BY turn", (run_id,)).fetchall()
+        return [dict(row) for row in rows]

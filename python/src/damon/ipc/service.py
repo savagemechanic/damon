@@ -121,6 +121,10 @@ class DamonService:
                 run_id = event.run_id
                 self.store.start_run(run_id, chat_id)
             self.store.add_event(event)
+            if event.type == "ScriptSaved":
+                self.store.add_script(event.run_id, event.payload)
+            elif event.type == "ExecutionFinished":
+                self.store.finish_script(event.payload["script_id"], event.payload.get("exit_code"), event.payload["duration"])
             if request.get("raw_event_logging", self.settings.raw_event_logging):
                 run_dir = self.home / "runs" / event.run_id
                 run_dir.mkdir(parents=True, exist_ok=True)

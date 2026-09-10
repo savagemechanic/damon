@@ -29,3 +29,16 @@ def test_promoted_tools_remain_readable_python(tmp_path):
     tool = library.promote(script, "Say Hello", "prints hello", "system", "run-1", "model")
     assert (tmp_path / "tools/system/say-hello.py").read_text() == "print('hello')"
     assert library.list()[0]["id"] == tool["id"]
+
+
+def test_script_index_retains_provenance_and_result(tmp_path):
+    database = DamonStore(tmp_path / "damon.sqlite3")
+    database.add_script("run-1", {
+        "script_id": "script-1", "turn": 1, "path": "/tmp/001.py", "source_hash": "abc",
+        "model": "model-a", "created_at": "now", "reusable_status": "none",
+    })
+    database.finish_script("script-1", 2, 0.4)
+    script = database.list_scripts("run-1")[0]
+    assert script["model"] == "model-a"
+    assert script["exit_code"] == 2
+    assert script["duration"] == 0.4

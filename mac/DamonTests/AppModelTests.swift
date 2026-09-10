@@ -22,6 +22,8 @@ private func event(_ type: String, _ payload: [String: JSONValue] = [:]) -> Damo
     #expect(state.stderr == "warning")
     #expect(state.exitCode == 0)
     #expect(state.changedFiles == ["created:result.txt"])
+    state.apply(event("RunStarted"))
+    #expect(state.runId == "run")
 }
 
 @Test func thinkingEffortBelongsToModelSelection() {
