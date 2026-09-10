@@ -9,3 +9,5 @@ build/
 .damon/
 *.db
 .DS_Store
+target/
+**/.build/
