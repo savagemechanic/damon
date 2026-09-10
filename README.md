@@ -102,6 +102,8 @@ PYTHONPATH=python/src .venv/bin/pytest -q python/tests
 open build/Damon.app
 ```
 
+The optional live Zen test runs only when both `DAMON_OPENCODE_API_KEY` and `DAMON_ZEN_TEST_MODEL` are explicitly set.
+
 The current Mac Command Line Tools distribution needs the workaround encoded in `scripts/swift_test.sh` to locate Apple's Testing framework. Full Xcode runs `swift test` normally.
 
 ## Release
