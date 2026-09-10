@@ -26,6 +26,10 @@ jobs:
           python -m compileall -q python/src
       - name: Swift tests
         run: ./scripts/swift_test.sh
+      - name: Xcode project and native UI tests
+        run: |
+          xcodebuild -project mac/Damon.xcodeproj -scheme Damon -configuration Debug CODE_SIGNING_ALLOWED=NO build
+          xcodebuild -project mac/Damon.xcodeproj -scheme Damon -destination 'platform=macOS' -only-testing:DamonUITests test
       - name: Package and smoke test extracted artifact
         run: ./scripts/smoke_test.sh
       - name: Write release notes

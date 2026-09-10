@@ -107,8 +107,8 @@ The current Mac Command Line Tools distribution needs the workaround encoded in 
 ## Release
 
 ```text
-tests → release build → embed CPython → ad-hoc sign → zip → extract
-      → bundled daemon IPC smoke test → SHA-256 → GitHub Release
+tests → native UI test → release build → embed CPython → ad-hoc sign → zip → extract
+      → mocked Zen stream → persisted child execution → SHA-256 → GitHub Release
 ```
 
 Run locally:
