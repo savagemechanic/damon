@@ -45,6 +45,11 @@ def test_service_config_models_and_streamed_run(tmp_path):
     run_id = output[0]["run_id"]
     assert service.store.list_events(run_id)
     assert (tmp_path / ".damon/runs" / run_id / "events.jsonl").exists()
+    script_path = next(event["payload"]["path"] for event in output if event["type"] == "ScriptSaved")
+    promoted = []
+    service.dispatch({"type": "promote", "path": script_path, "name": "service script", "description": "test", "category": "misc", "run_id": run_id, "model": "test-model"}, promoted.append)
+    assert promoted[0]["type"] == "tool_saved"
+    assert service.tools.list()[0]["name"] == "service script"
 
 
 def test_service_refuses_run_without_key(tmp_path):

@@ -17,6 +17,7 @@ struct ConversationState: Equatable, Sendable {
     var status = "Ready"
     var duration: Double?
     var exitCode: Int?
+    var scriptPath: String?
     var error: String?
 
     mutating func apply(_ event: DamonEvent) {
@@ -25,6 +26,7 @@ struct ConversationState: Equatable, Sendable {
         case "ReasoningDelta": reasoning += event.payload["delta"]?.string ?? ""
         case "TextDelta": answer += event.payload["delta"]?.string ?? ""
         case "PythonDetected": python = event.payload["source"]?.string ?? ""
+        case "ScriptSaved": scriptPath = event.payload["path"]?.string
         case "ExecutionStarted": status = "Executing Python"
         case "StdoutDelta": stdout += event.payload["delta"]?.string ?? ""
         case "StderrDelta": stderr += event.payload["delta"]?.string ?? ""
@@ -51,6 +53,7 @@ final class AppModel: ObservableObject {
     @Published var isConnected = false
     @Published var models: [ZenModel] = []
     @Published var selectedModel = UserDefaults.standard.string(forKey: "selectedModel") ?? ""
+    @Published var sidebarSelection = "conversation"
     private let daemon = DaemonManager()
     private lazy var client = UnixSocketClient(path: daemon.socketPath)
 
@@ -101,6 +104,31 @@ final class AppModel: ObservableObject {
         Task { @MainActor in
             do { try await configureAndLoad() }
             catch { conversation.status = "Connection failed"; conversation.error = String(describing: error) }
+        }
+    }
+
+    func configure(apiKey: String) {
+        conversation.status = "Connecting"
+        Task { @MainActor in
+            do {
+                _ = try await client.request(IPCRequest(type: "configure", apiKey: apiKey))
+                let modelLines = try await client.request(IPCRequest(type: "models"))
+                models = try JSONDecoder().decode(IPCResponse.self, from: modelLines[0]).models ?? []
+                if !models.contains(where: { $0.id == selectedModel }) { selectedModel = models.first?.id ?? "" }
+                conversation.status = "Ready"
+            } catch { conversation.status = "Connection failed"; conversation.error = String(describing: error) }
+        }
+    }
+
+    func promoteCurrentScript() {
+        guard let path = conversation.scriptPath else { return }
+        Task { @MainActor in
+            do {
+                _ = try await client.request(IPCRequest(type: "promote", path: path, name: URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent, description: "Saved from a Damon run", category: "misc"))
+                let lines = try await client.request(IPCRequest(type: "tools"))
+                tools = try JSONDecoder().decode(IPCResponse.self, from: lines[0]).tools ?? []
+                sidebarSelection = "tools"
+            } catch { conversation.error = String(describing: error) }
         }
     }
 

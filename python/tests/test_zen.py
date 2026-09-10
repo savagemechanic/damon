@@ -1,8 +1,20 @@
 import json
+from unittest.mock import patch
 
 import pytest
 
 from damon.providers.zen import ModelInfo, ZenProvider, parse_sse
+
+
+class Response:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def __iter__(self):
+        return iter([b"data: [DONE]\n"])
 
 
 def test_request_serialization_is_model_aware():
@@ -28,3 +40,19 @@ def test_sse_parser_separates_reasoning_and_text():
 def test_sse_parser_rejects_bad_json():
     with pytest.raises(ValueError):
         list(parse_sse([b"data: nope\n"]))
+
+
+def test_requests_match_current_opencode_identity_envelope():
+    provider = ZenProvider("secret", "https://example.test/v1", session_id="session-1", project_id="project-1")
+    with patch("damon.providers.zen.urlopen", return_value=Response()) as send:
+        list(provider.stream_chat([], ModelInfo("model-a", "Model A")))
+
+    request = send.call_args.args[0]
+    headers = {key.lower(): value for key, value in request.header_items()}
+    assert request.full_url == "https://example.test/v1/chat/completions"
+    assert headers["authorization"] == "Bearer secret"
+    assert headers["x-opencode-session"] == "session-1"
+    assert headers["x-opencode-client"] == "damon"
+    assert headers["x-opencode-project"] == "project-1"
+    assert headers["x-opencode-request"]
+    assert headers["user-agent"] == "damon/0.1.0"

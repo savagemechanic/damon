@@ -81,9 +81,13 @@ struct IPCRequest: Codable, Sendable {
     var pythonExecutable: String? = nil
     var maxTurns: Int? = nil
     var executionTimeout: Double? = nil
+    var path: String? = nil
+    var name: String? = nil
+    var description: String? = nil
+    var category: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case type, message, model
+        case type, message, model, path, name, description, category
         case apiKey = "api_key"
         case thinkingEffort = "thinking_effort"
         case systemPrompt = "system_prompt"

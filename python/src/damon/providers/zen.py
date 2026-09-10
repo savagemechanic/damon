@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 from typing import Iterable
+import uuid
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -36,17 +38,26 @@ def parse_sse(lines: Iterable[bytes]) -> Iterable[tuple[str, str]]:
 
 
 class ZenProvider:
-    def __init__(self, api_key: str, base_url: str = "https://opencode.ai/zen/v1"):
+    def __init__(self, api_key: str, base_url: str = "https://opencode.ai/zen/v1",
+                 session_id: str | None = None, project_id: str | None = None):
         if not api_key:
             raise ValueError("Zen API key is required")
         self._api_key = api_key
         self.base_url = base_url.rstrip("/")
+        self.session_id = session_id or str(uuid.uuid4())
+        self.project_id = project_id or os.environ.get("OPENCODE_PROJECT_ID")
 
     def _request(self, path: str, body: dict | None = None):
         data = None if body is None else json.dumps(body).encode()
         request = Request(self.base_url + path, data=data)
         request.add_header("Authorization", f"Bearer {self._api_key}")
         request.add_header("Content-Type", "application/json")
+        request.add_header("x-opencode-session", self.session_id)
+        request.add_header("x-opencode-request", str(uuid.uuid4()))
+        request.add_header("x-opencode-client", "damon")
+        request.add_header("User-Agent", "damon/0.1.0")
+        if self.project_id:
+            request.add_header("x-opencode-project", self.project_id)
         try:
             return urlopen(request, timeout=30)
         except HTTPError as exc:

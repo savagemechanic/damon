@@ -27,11 +27,14 @@ struct KeychainStore: SecretStore, @unchecked Sendable {
     }
 
     func set(_ value: String) throws {
-        try delete()
-        var request = query
-        request[kSecValueData as String] = Data(value.utf8)
-        let status = SecItemAdd(request as CFDictionary, nil)
-        guard status == errSecSuccess else { throw KeychainError.status(status) }
+        let data = Data(value.utf8)
+        let updated = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if updated == errSecSuccess { return }
+        guard updated == errSecItemNotFound else { throw KeychainError.status(updated) }
+        var item = query
+        item[kSecValueData as String] = data
+        let added = SecItemAdd(item as CFDictionary, nil)
+        guard added == errSecSuccess else { throw KeychainError.status(added) }
     }
 
     func delete() throws {

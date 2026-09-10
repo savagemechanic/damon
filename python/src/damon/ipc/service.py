@@ -53,6 +53,13 @@ class DamonService:
             emit({"type": "tools", "tools": self.tools.list()})
         elif kind == "chats":
             emit({"type": "chats", "chats": self.store.list_chats()})
+        elif kind == "promote":
+            tool = self.tools.promote(
+                Path(request["path"]), request["name"], request.get("description", ""),
+                request.get("category", "misc"), request.get("run_id", "unknown"),
+                request.get("model", "unknown"),
+            )
+            emit({"type": "tool_saved", "tool": tool})
         elif kind == "run":
             self._run(request, emit)
         else:
