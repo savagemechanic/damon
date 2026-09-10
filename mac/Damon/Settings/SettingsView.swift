@@ -7,7 +7,7 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             Form {
-                SecureField("API key", text: $settings.apiKey)
+                SecureField("API key", text: $settings.apiKey).accessibilityIdentifier("zen-api-key")
                 HStack { Button("Save") { try? settings.saveKey(); model.configure(apiKey: settings.apiKey) }; Button("Delete", role: .destructive) { try? settings.deleteKey(); model.clearAPIKey() }; Button("Test Connection") { settings.apiKey.isEmpty ? model.reloadConfiguration() : model.configure(apiKey: settings.apiKey) } }
                 Picker("Model", selection: $model.selectedModel) { ForEach(model.models, id: \.id) { Text($0.name).tag($0.id) } }
                     .onChange(of: model.selectedModel) { _, value in UserDefaults.standard.set(value, forKey: "selectedModel") }

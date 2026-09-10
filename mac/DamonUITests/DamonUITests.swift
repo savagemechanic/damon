@@ -12,7 +12,7 @@ final class DamonUITests: XCTestCase {
 
         app.typeKey(",", modifierFlags: .command)
         XCTAssertTrue(app.buttons["Model"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.secureTextFields["API key"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["zen-api-key"].exists)
         app.typeKey("w", modifierFlags: .command)
 
         app.menuBars.menuBarItems["Damon"].click()
