@@ -130,7 +130,11 @@ fn lexical_evidence(text: &str, intent: IntentId) -> i32 {
             if text.contains("python")
                 && (text.contains("executable")
                     || text.contains("where is")
-                    || text.contains("path")) =>
+                    || text.contains("path")
+                    || text.contains("locate")
+                    || text.contains("find python")
+                    || text.contains("which python")
+                    || text.contains("python location")) =>
         {
             180
         }
@@ -590,11 +594,19 @@ mod tests {
         let p = std::env::temp_dir().join(format!("damon-python-lang-{}.data", std::process::id()));
         let _ = std::fs::remove_file(&p);
         let d = DamonData::open(&p).unwrap();
-        let Interpretation::Resolved(meaning) = understand("where is the python executable?", &d)
-        else {
-            panic!("Python executable question should resolve without a model")
-        };
-        assert_eq!(meaning.intent, INTENT_LOCATE_PYTHON);
+        for prompt in [
+            "where is the python executable?",
+            "what path is python on?",
+            "locate Python for me",
+            "find python",
+            "which Python is installed?",
+            "show the Python location",
+        ] {
+            let Interpretation::Resolved(meaning) = understand(prompt, &d) else {
+                panic!("Python executable question should resolve without a model: {prompt}")
+            };
+            assert_eq!(meaning.intent, INTENT_LOCATE_PYTHON, "{prompt}");
+        }
         let _ = std::fs::remove_file(p);
     }
 

@@ -268,3 +268,72 @@ fn passing_real_tests_allow_the_real_diff() {
     assert!(response.contains("+// verified change"), "{response}");
     assert_eq!(runtime.data.learned_graphs.len(), 1);
 }
+
+#[test]
+fn verified_tool_results_are_composed_by_the_model() {
+    let f = Fixture::new();
+    fs::write(f.0.join("alpha.txt"), "evidence").unwrap();
+    let captured = f.0.join("composition-prompt.txt");
+    let mut models = damon::model::ModelRouter::default();
+    models.ollama_model.clear();
+    models.allow_cloud = false;
+    models.external_command = Some(format!(
+        "cat > '{}'; printf '%s' '{{\"answer\":\"Damon contains alpha.txt and its memory file.\"}}'",
+        captured.display()
+    ));
+    let mut runtime = damon::Damon {
+        data: f.data(),
+        models,
+        policy: Default::default(),
+    };
+
+    let response = runtime.handle("list files in Damon");
+
+    assert_eq!(response, "Damon contains alpha.txt and its memory file.");
+    let prompt = fs::read_to_string(captured).unwrap();
+    assert!(prompt.contains("verified_results"));
+    assert!(prompt.contains("alpha.txt"));
+    assert!(prompt.contains("list files in Damon"));
+}
+
+#[test]
+fn invalid_model_composition_falls_back_to_verified_rendering() {
+    let f = Fixture::new();
+    fs::write(f.0.join("alpha.txt"), "evidence").unwrap();
+    let mut models = damon::model::ModelRouter::default();
+    models.ollama_model.clear();
+    models.allow_cloud = false;
+    models.external_command = Some("printf '%s' 'not valid response JSON'".into());
+    let mut runtime = damon::Damon {
+        data: f.data(),
+        models,
+        policy: Default::default(),
+    };
+
+    let response = runtime.handle("list files in Damon");
+
+    assert!(response.contains("alpha.txt"));
+}
+
+#[test]
+fn malformed_model_composition_gets_one_repair_attempt() {
+    let f = Fixture::new();
+    fs::write(f.0.join("alpha.txt"), "evidence").unwrap();
+    let marker = f.0.join("composition-attempted");
+    let mut models = damon::model::ModelRouter::default();
+    models.ollama_model.clear();
+    models.allow_cloud = false;
+    models.external_command = Some(format!(
+        "if [ -f '{0}' ]; then printf '%s' '{{\"answer\":\"The workspace contains alpha.txt.\"}}'; else : > '{0}'; printf '%s' '{{\"files\":[\"alpha.txt\"]}}'; fi",
+        marker.display()
+    ));
+    let mut runtime = damon::Damon {
+        data: f.data(),
+        models,
+        policy: Default::default(),
+    };
+
+    let response = runtime.handle("list files in Damon");
+
+    assert_eq!(response, "The workspace contains alpha.txt.");
+}

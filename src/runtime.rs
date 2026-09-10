@@ -200,6 +200,7 @@ impl Damon {
             }
         }
         let mut outcomes: Vec<bool> = Vec::new();
+        let mut results = Vec::new();
         let mut messages = Vec::new();
         let mut strategy_errors = Vec::new();
         event(RuntimeState::Running);
@@ -244,6 +245,7 @@ impl Damon {
             }
             outcomes.push(result.success);
             messages.push(structured.render_english());
+            results.push(structured);
         }
         event(RuntimeState::Learning);
         let all_succeeded = outcomes.iter().all(|value| *value);
@@ -287,7 +289,8 @@ impl Damon {
                 strategy_errors.join("; ")
             ));
         }
-        let rendered = messages.join("\n");
+        let deterministic = messages.join("\n");
+        let rendered = self.compose_response(input, &results, &deterministic, event);
         match self.data.save() {
             Ok(()) => rendered,
             Err(e) => format!(
@@ -376,7 +379,8 @@ impl Damon {
         event(RuntimeState::Running);
         let result = tools::execute(action, &self.policy);
         event(RuntimeState::Verifying);
-        let rendered = crate::result_ir::ResultIr::from_tool(action, &result).render_english();
+        let structured = crate::result_ir::ResultIr::from_tool(action, &result);
+        let deterministic = structured.render_english();
         if let Some(implementation) = self.data.capabilities.resolve_index(action.capability) {
             let _ = self
                 .data
@@ -396,12 +400,58 @@ impl Damon {
             },
         );
         event(RuntimeState::Learning);
+        let rendered = self.compose_response(input, &[structured], &deterministic, event);
         Some(match self.data.save() {
             Ok(()) => rendered,
             Err(error) => format!(
                 "{rendered}\nI could not persist learning: {error}. Reopen Damon before continuing."
             ),
         })
+    }
+
+    fn compose_response(
+        &self,
+        input: &str,
+        results: &[crate::result_ir::ResultIr],
+        deterministic: &str,
+        event: &mut impl FnMut(RuntimeState),
+    ) -> String {
+        if results.is_empty() {
+            return deterministic.to_owned();
+        }
+        let prompt = crate::result_ir::response_prompt(input, results, deterministic);
+        let schema = crate::result_ir::response_schema();
+        let infer = |prompt: &str, event: &mut dyn FnMut(RuntimeState)| {
+            self.models.infer_structured_validated_with_events(
+                prompt,
+                &schema,
+                |text| crate::result_ir::parse_response(text).map(|_| ()),
+                |model_event| match model_event {
+                    crate::model::ModelEvent::AskingOllama => event(RuntimeState::AskingOllama),
+                    crate::model::ModelEvent::AskingCloud => event(RuntimeState::AskingCloud),
+                    crate::model::ModelEvent::Thinking => event(RuntimeState::Thinking),
+                    crate::model::ModelEvent::Processing => event(RuntimeState::Processing),
+                },
+            )
+        };
+        let first = infer(&prompt, event);
+        let response = match first {
+            Ok(response) => Ok(response),
+            Err(first_error) => {
+                let repair = format!(
+                    "{prompt}\nYour previous response was rejected: {first_error}. Return exactly {{\"answer\":\"your concise grounded answer\"}} and no other fields."
+                );
+                infer(&repair, event)
+                    .map_err(|second_error| format!("{first_error}; repair failed: {second_error}"))
+            }
+        };
+        match response.and_then(|response| crate::result_ir::parse_response(&response.text)) {
+            Ok(response) => response,
+            Err(error) => {
+                eprintln!("Response composition fallback: {error}");
+                deterministic.to_owned()
+            }
+        }
     }
 
     fn ask_teacher(
