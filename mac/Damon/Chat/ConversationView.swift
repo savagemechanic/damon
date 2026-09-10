@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ConversationView: View {
     @ObservedObject var model: AppModel
+    @AppStorage("reasoningVisibility") private var reasoningVisibility = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -16,8 +17,10 @@ struct ConversationView: View {
                             Text(message.content).textSelection(.enabled)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    DisclosureGroup("Thinking") { Text(model.conversation.reasoning).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
-                        .disabled(model.conversation.reasoning.isEmpty)
+                    if reasoningVisibility {
+                        DisclosureGroup("Thinking") { Text(model.conversation.reasoning).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                            .disabled(model.conversation.reasoning.isEmpty)
+                    }
                     DisclosureGroup("Python") { Text(model.conversation.python).font(.system(.body, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                         .disabled(model.conversation.python.isEmpty)
                     DisclosureGroup("stdout / stderr") {

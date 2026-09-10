@@ -15,8 +15,8 @@ struct SettingsView: View {
                 Text(model.conversation.status).foregroundStyle(.secondary)
             }.padding().tabItem { Label("Model", systemImage: "brain") }
             Form { TextEditor(text: $settings.systemPrompt).font(.system(.body, design: .monospaced)) }.padding().tabItem { Label("Prompt", systemImage: "text.quote") }
-            Form { TextField("Python executable", text: $settings.pythonExecutable); Stepper("Max turns: \(settings.maxTurns)", value: $settings.maxTurns, in: 1...32); Stepper("Timeout: \(Int(settings.executionTimeout))s", value: $settings.executionTimeout, in: 1...600) }.padding().tabItem { Label("Runtime", systemImage: "terminal") }
-            Form { Toggle("Provider reasoning visibility", isOn: $settings.reasoningVisibility); Toggle("Raw event logging", isOn: $settings.rawEventLogging) }.padding().tabItem { Label("Advanced", systemImage: "gearshape.2") }
+            Form { TextField("Python executable", text: $settings.pythonExecutable); TextField("Working directory", text: $settings.workingDirectory); TextField("Tools directory", text: $settings.toolsDirectory).disabled(true); Stepper("Max turns: \(settings.maxTurns)", value: $settings.maxTurns, in: 1...32); Stepper("Timeout: \(Int(settings.executionTimeout))s", value: $settings.executionTimeout, in: 1...600) }.padding().tabItem { Label("Runtime", systemImage: "terminal") }
+            Form { Toggle("Provider reasoning visibility", isOn: $settings.reasoningVisibility); Toggle("Raw event logging", isOn: $settings.rawEventLogging); Toggle("Save generated scripts", isOn: .constant(true)).disabled(true) }.padding().tabItem { Label("Advanced", systemImage: "gearshape.2") }
         }.frame(width: 560, height: 380)
     }
 }

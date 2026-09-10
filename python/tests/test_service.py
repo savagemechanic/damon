@@ -77,6 +77,22 @@ def test_configured_key_can_be_cleared_from_daemon_memory(tmp_path):
     assert output == [{"type": "api_key_cleared"}]
 
 
+def test_raw_jsonl_can_be_disabled_without_disabling_sqlite_audit(tmp_path):
+    provider = Provider("test-secret")
+    service = DamonService(tmp_path / ".damon", provider_factory=lambda key: provider)
+    service.api_key = "test-secret"
+    service.catalog.cache_path.parent.mkdir(parents=True, exist_ok=True)
+    service.catalog.cache_path.write_text('{"models":[{"id":"test-model","name":"Test Model","reasoning_efforts":["low"]}]}')
+    output = []
+    service.dispatch({
+        "type": "run", "message": "inspect", "model": "test-model", "thinking_effort": "low",
+        "working_directory": str(tmp_path), "raw_event_logging": False,
+    }, output.append)
+    run_id = output[0]["run_id"]
+    assert service.store.list_events(run_id)
+    assert not (tmp_path / ".damon/runs" / run_id / "events.jsonl").exists()
+
+
 class SlowProvider:
     def __init__(self, _key):
         pass

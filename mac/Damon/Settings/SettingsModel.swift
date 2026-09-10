@@ -8,6 +8,8 @@ final class SettingsModel: ObservableObject {
     @AppStorage("pythonExecutable") var pythonExecutable = "python3"
     @AppStorage("maxTurns") var maxTurns = 8
     @AppStorage("executionTimeout") var executionTimeout = 60.0
+    @AppStorage("workingDirectory") var workingDirectory = FileManager.default.homeDirectoryForCurrentUser.path
+    @AppStorage("toolsDirectory") var toolsDirectory = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".damon/tools").path
     @AppStorage("reasoningVisibility") var reasoningVisibility = true
     @AppStorage("rawEventLogging") var rawEventLogging = true
     @Published var apiKey = ""

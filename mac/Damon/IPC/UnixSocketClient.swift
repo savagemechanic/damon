@@ -86,6 +86,7 @@ struct IPCRequest: Codable, Sendable {
     var description: String? = nil
     var category: String? = nil
     var chatId: String? = nil
+    var rawEventLogging: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case type, message, model, path, name, description, category
@@ -97,6 +98,7 @@ struct IPCRequest: Codable, Sendable {
         case maxTurns = "max_turns"
         case executionTimeout = "execution_timeout"
         case chatId = "chat_id"
+        case rawEventLogging = "raw_event_logging"
     }
 }
 

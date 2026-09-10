@@ -121,10 +121,11 @@ class DamonService:
                 run_id = event.run_id
                 self.store.start_run(run_id, chat_id)
             self.store.add_event(event)
-            run_dir = self.home / "runs" / event.run_id
-            run_dir.mkdir(parents=True, exist_ok=True)
-            with (run_dir / "events.jsonl").open("a") as stream:
-                stream.write(event.to_json() + "\n")
+            if request.get("raw_event_logging", self.settings.raw_event_logging):
+                run_dir = self.home / "runs" / event.run_id
+                run_dir.mkdir(parents=True, exist_ok=True)
+                with (run_dir / "events.jsonl").open("a") as stream:
+                    stream.write(event.to_json() + "\n")
             if event.type == "RunFinished":
                 self.store.finish_run(event.run_id, "finished")
                 self.store.add_message(chat_id, "assistant", event.payload["answer"])

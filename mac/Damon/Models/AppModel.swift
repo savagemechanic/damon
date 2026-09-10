@@ -182,11 +182,12 @@ final class AppModel: ObservableObject {
                     type: "run", message: message, model: selectedModel,
                     thinkingEffort: defaults.string(forKey: "thinkingEffort"),
                     systemPrompt: defaults.string(forKey: "systemPrompt"),
-                    workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path,
+                    workingDirectory: defaults.string(forKey: "workingDirectory") ?? FileManager.default.homeDirectoryForCurrentUser.path,
                     pythonExecutable: defaults.string(forKey: "pythonExecutable") ?? "python3",
                     maxTurns: maxTurns == 0 ? 8 : maxTurns,
                     executionTimeout: timeout == 0 ? 60 : timeout
-                    , chatId: activeChatId
+                    , chatId: activeChatId,
+                    rawEventLogging: defaults.object(forKey: "rawEventLogging") == nil ? true : defaults.bool(forKey: "rawEventLogging")
                 ))
                 for try await line in lines {
                     if let event = try? JSONDecoder().decode(DamonEvent.self, from: line) {
