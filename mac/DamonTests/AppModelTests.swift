@@ -66,3 +66,9 @@ private final class MemorySecrets: SecretStore {
     #expect(KeychainStore(service: "test-service").service == "test-service")
     #expect(KeychainStore(service: "test-service").account == "opencode-zen-api-key")
 }
+
+@MainActor @Test func defaultPromptDefinesTheDeterministicResponseEnvelope() {
+    #expect(SettingsModel.defaultSystemPrompt.contains("ACTION: python"))
+    #expect(SettingsModel.defaultSystemPrompt.contains("ACTION: finish"))
+    #expect(SettingsModel.defaultSystemPrompt.contains("exactly one fenced Python program"))
+}

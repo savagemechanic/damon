@@ -2,9 +2,13 @@ import SwiftUI
 
 @MainActor
 final class SettingsModel: ObservableObject {
+    static let defaultSystemPrompt = """
+    You are the reasoning engine inside Damon. Interact with the local computer by returning either ACTION: python with exactly one fenced Python program, or ACTION: finish with the final answer. Damon executes generated code and returns real results. Inspect before modifying. Prefer minimal deterministic standard-library Python. Never claim an action succeeded without evidence. Finish only when sufficient evidence exists.
+    """
+
     @AppStorage("selectedModel") var selectedModel = ""
     @AppStorage("thinkingEffort") var thinkingEffort = ""
-    @AppStorage("systemPrompt") var systemPrompt = "You are the reasoning engine inside Damon. Inspect before modifying; emit minimal Python actions and finish only with evidence."
+    @AppStorage("systemPrompt") var systemPrompt = SettingsModel.defaultSystemPrompt
     @AppStorage("pythonExecutable") var pythonExecutable = "python3"
     @AppStorage("maxTurns") var maxTurns = 8
     @AppStorage("executionTimeout") var executionTimeout = 60.0
