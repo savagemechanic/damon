@@ -47,3 +47,19 @@ def test_bounds_captured_output(tmp_path):
     result = PythonExecutor(sys.executable, ExecutionPolicy(max_output_bytes=10)).run(
         script(tmp_path, "print('x' * 100)"), tmp_path)
     assert len(result.stdout.encode()) == 10 and result.output_truncated
+
+
+def test_reports_created_modified_and_deleted_files(tmp_path):
+    existing = tmp_path / "existing.txt"
+    removed = tmp_path / "removed.txt"
+    existing.write_text("before")
+    removed.write_text("remove me")
+    result = PythonExecutor(sys.executable).run(script(tmp_path, """
+from pathlib import Path
+Path('existing.txt').write_text('after')
+Path('created.txt').write_text('new')
+Path('removed.txt').unlink()
+"""), tmp_path)
+    assert set(result.changed_files) == {
+        "created:created.txt", "modified:existing.txt", "deleted:removed.txt"
+    }

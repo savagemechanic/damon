@@ -10,3 +10,5 @@ class ExecutionResult:
     timed_out: bool = False
     cancelled: bool = False
     output_truncated: bool = False
+    changed_files: tuple[str, ...] = ()
+    change_scan_truncated: bool = False

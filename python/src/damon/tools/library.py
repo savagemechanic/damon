@@ -6,15 +6,17 @@ from pathlib import Path
 import re
 import shutil
 import sqlite3
+import threading
 import uuid
 
 
 class ToolLibrary:
     CATEGORIES = {"git", "files", "network", "system", "misc"}
 
-    def __init__(self, home: Path, connection: sqlite3.Connection):
+    def __init__(self, home: Path, connection: sqlite3.Connection, lock: threading.RLock | None = None):
         self.home = home
         self.connection = connection
+        self.lock = lock or threading.RLock()
 
     def promote(self, script: Path, name: str, description: str, category: str,
                 run_id: str, model: str) -> dict:
@@ -34,13 +36,15 @@ class ToolLibrary:
             "originating_run": run_id, "originating_model": model,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        self.connection.execute(
-            "INSERT INTO tools(id,name,description,path,category,source_hash,originating_run,originating_model,created_at) VALUES(:id,:name,:description,:path,:category,:source_hash,:originating_run,:originating_model,:created_at)",
-            tool,
-        )
-        self.connection.commit()
+        with self.lock:
+            self.connection.execute(
+                "INSERT INTO tools(id,name,description,path,category,source_hash,originating_run,originating_model,created_at) VALUES(:id,:name,:description,:path,:category,:source_hash,:originating_run,:originating_model,:created_at)",
+                tool,
+            )
+            self.connection.commit()
         return tool
 
     def list(self) -> list[dict]:
-        rows = self.connection.execute("SELECT * FROM tools ORDER BY created_at DESC").fetchall()
+        with self.lock:
+            rows = self.connection.execute("SELECT * FROM tools ORDER BY created_at DESC").fetchall()
         return [dict(row) for row in rows]

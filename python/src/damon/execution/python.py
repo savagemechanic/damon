@@ -15,6 +15,23 @@ from .result import ExecutionResult
 StreamCallback = Callable[[str, str], None]
 
 
+def _snapshot(root: Path, limit: int) -> tuple[dict[str, tuple[int, int]], bool]:
+    result: dict[str, tuple[int, int]] = {}
+    skipped = {".git", ".damon", ".build", "__pycache__", "node_modules", "Library"}
+    for directory, names, files in os.walk(root, onerror=lambda _: None):
+        names[:] = [name for name in names if name not in skipped]
+        for name in files:
+            path = Path(directory) / name
+            try:
+                stat = path.stat()
+                result[str(path.relative_to(root))] = (stat.st_size, stat.st_mtime_ns)
+            except (OSError, ValueError):
+                continue
+            if len(result) >= limit:
+                return result, True
+    return result, False
+
+
 class PythonExecutor:
     def __init__(self, executable: str, policy: ExecutionPolicy | None = None):
         self.executable = executable
@@ -37,12 +54,14 @@ class PythonExecutor:
 
     def run(self, script: Path, cwd: Path, on_stream: StreamCallback | None = None) -> ExecutionResult:
         started = time.monotonic()
-        self._cancelled = False
+        before, scan_truncated = _snapshot(cwd, self.policy.max_scanned_files)
         process = subprocess.Popen(
             [self.executable, "-I", str(script)], cwd=cwd, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, start_new_session=True,
         )
         self._process = process
+        if self._cancelled:
+            self._terminate_group()
         selector = selectors.DefaultSelector()
         assert process.stdout and process.stderr
         selector.register(process.stdout, selectors.EVENT_READ, "stdout")
@@ -75,9 +94,14 @@ class PythonExecutor:
         finally:
             selector.close()
             self._process = None
+        after, after_truncated = _snapshot(cwd, self.policy.max_scanned_files)
+        changes = [f"created:{path}" for path in after.keys() - before.keys()]
+        changes += [f"deleted:{path}" for path in before.keys() - after.keys()]
+        changes += [f"modified:{path}" for path in before.keys() & after.keys() if before[path] != after[path]]
         return ExecutionResult(
             exit_code=exit_code, duration=time.monotonic() - started,
             stdout=captured["stdout"].decode("utf-8", errors="replace"),
             stderr=captured["stderr"].decode("utf-8", errors="replace"),
             timed_out=timed_out, cancelled=self._cancelled, output_truncated=truncated,
+            changed_files=tuple(sorted(changes)), change_scan_truncated=scan_truncated or after_truncated,
         )

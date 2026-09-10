@@ -54,6 +54,9 @@ class Harness:
             ))
             self.script_store.record_result(run_id, metadata["id"], result.exit_code, result.duration)
             emit(DamonEvent("ExecutionFinished", run_id, asdict(result)))
+            if result.cancelled:
+                emit(DamonEvent("Error", run_id, {"message": "run cancelled"}))
+                return ""
             observation = json.dumps(asdict(result), ensure_ascii=False)
             messages.append({"role": "user", "content": "EXECUTION RESULT\n" + observation})
             emit(DamonEvent("TurnFinished", run_id, {"turn": turn}))

@@ -3,7 +3,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 temporary="$(mktemp -d /tmp/damon-smoke.XXXXXX)"
 socket_path="$temporary/damon.sock"
-cleanup() { [[ -n "${daemon_pid:-}" ]] && kill "$daemon_pid" 2>/dev/null || true; rm -rf "$temporary"; }
+cleanup() { [[ -n "${daemon_pid:-}" ]] && kill "$daemon_pid" 2>/dev/null || true; [[ -n "${mock_pid:-}" ]] && kill "$mock_pid" 2>/dev/null || true; rm -rf "$temporary"; }
 trap cleanup EXIT
 
 "$root/scripts/package_release.sh" >/dev/null
@@ -14,17 +14,36 @@ frameworks="$temporary/extracted/Damon.app/Contents/Resources/Frameworks"
 runtime="$(find "$frameworks/Python.framework/Versions" -type f -path '*/bin/python3.*' ! -name '*-config' | head -1)"
 test -x "$runtime"
 DYLD_FRAMEWORK_PATH="$frameworks" "$runtime" --version
-DYLD_FRAMEWORK_PATH="$frameworks" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$temporary/extracted/Damon.app/Contents/Resources/python/src" "$runtime" -m damon.ipc.server --socket "$socket_path" &
+python3 "$root/scripts/mock_zen.py" --port-file "$temporary/mock-port" &
+mock_pid=$!
+for _ in {1..50}; do [[ -f "$temporary/mock-port" ]] && break; sleep 0.05; done
+test -f "$temporary/mock-port"
+mock_port="$(<"$temporary/mock-port")"
+DAMON_ZEN_BASE_URL="http://127.0.0.1:$mock_port/v1" DYLD_FRAMEWORK_PATH="$frameworks" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$temporary/extracted/Damon.app/Contents/Resources/python/src" "$runtime" -m damon.ipc.server --socket "$socket_path" --home "$temporary/home" &
 daemon_pid=$!
 for _ in {1..50}; do [[ -S "$socket_path" ]] && break; sleep 0.05; done
 test -S "$socket_path"
-SOCKET_PATH="$socket_path" python3 - <<'PY'
+SOCKET_PATH="$socket_path" WORK_PATH="$temporary" python3 - <<'PY'
 import json, os, socket
-client = socket.socket(socket.AF_UNIX)
-client.connect(os.environ["SOCKET_PATH"])
-client.sendall(b'{"type":"ping"}\n')
-client.shutdown(socket.SHUT_WR)
-assert json.loads(client.makefile().readline()) == {"type": "pong", "protocol": 1}
+def request(value):
+    client = socket.socket(socket.AF_UNIX)
+    client.connect(os.environ["SOCKET_PATH"])
+    client.sendall(json.dumps(value).encode() + b'\n')
+    client.shutdown(socket.SHUT_WR)
+    result = [json.loads(line) for line in client.makefile()]
+    client.close()
+    return result
+
+assert request({"type": "ping"}) == [{"type": "pong", "protocol": 1}]
+assert request({"type": "configure", "api_key": "smoke-secret"}) == [{"type": "configured"}]
+models = request({"type": "models"})[0]
+assert models["source"] == "live" and models["models"][0]["id"] == "mock-model"
+events = request({"type": "run", "message": "create smoke evidence", "model": "mock-model", "thinking_effort": "low", "working_directory": os.environ["WORK_PATH"]})
+types = [event["type"] for event in events]
+assert "ScriptSaved" in types and "StdoutDelta" in types and "ExecutionFinished" in types
+assert types[-1] == "RunFinished"
+assert events[-1]["payload"]["answer"] == "Packaged conversation complete."
+assert os.path.exists(os.path.join(os.environ["WORK_PATH"], "damon-smoke-output.txt"))
 PY
 codesign --verify --deep --strict "$temporary/extracted/Damon.app"
-echo "packaged daemon IPC smoke test passed"
+echo "packaged mocked-Zen execution smoke test passed"

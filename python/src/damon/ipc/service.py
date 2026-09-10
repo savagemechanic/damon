@@ -4,6 +4,7 @@ from dataclasses import asdict
 import json
 from pathlib import Path
 import sys
+import threading
 from typing import Callable
 
 from damon.config.settings import Settings
@@ -28,7 +29,9 @@ class DamonService:
         self.settings = Settings.load(home / "config.json")
         self.catalog = ModelCatalog(home / "models.json")
         self.store = DamonStore(home / "damon.sqlite3")
-        self.tools = ToolLibrary(home, self.store.connection)
+        self.tools = ToolLibrary(home, self.store.connection, self.store.lock)
+        self._active_executors: set[PythonExecutor] = set()
+        self._active_lock = threading.Lock()
 
     def dispatch(self, request: dict, emit: Emit) -> None:
         kind = request.get("type")
@@ -40,6 +43,9 @@ class DamonService:
                 raise ValueError("api_key is required")
             self.api_key = key
             emit({"type": "configured"})
+        elif kind == "clear_api_key":
+            self.api_key = None
+            emit({"type": "api_key_cleared"})
         elif kind == "models":
             provider = self._provider()
             try:
@@ -53,6 +59,11 @@ class DamonService:
             emit({"type": "tools", "tools": self.tools.list()})
         elif kind == "chats":
             emit({"type": "chats", "chats": self.store.list_chats()})
+        elif kind == "messages":
+            chat_id = request.get("chat_id")
+            if not isinstance(chat_id, str) or not chat_id:
+                raise ValueError("chat_id is required")
+            emit({"type": "messages", "messages": self.store.chat_messages(chat_id)})
         elif kind == "promote":
             tool = self.tools.promote(
                 Path(request["path"]), request["name"], request.get("description", ""),
@@ -60,6 +71,12 @@ class DamonService:
                 request.get("model", "unknown"),
             )
             emit({"type": "tool_saved", "tool": tool})
+        elif kind == "cancel":
+            with self._active_lock:
+                active = list(self._active_executors)
+            for executor in active:
+                executor.cancel()
+            emit({"type": "cancelled", "count": len(active)})
         elif kind == "run":
             self._run(request, emit)
         else:
@@ -85,6 +102,8 @@ class DamonService:
             request.get("python_executable", self.settings.python_executable or sys.executable),
             ExecutionPolicy(float(request.get("execution_timeout", self.settings.execution_timeout))),
         )
+        with self._active_lock:
+            self._active_executors.add(executor)
         harness = Harness(
             provider, model, executor, ScriptStore(self.home),
             request.get("system_prompt", self.settings.system_prompt),
@@ -121,3 +140,6 @@ class DamonService:
             if run_id:
                 self.store.finish_run(run_id, "error")
             raise
+        finally:
+            with self._active_lock:
+                self._active_executors.discard(executor)

@@ -77,8 +77,9 @@ class DamonServer:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Damon local daemon")
     parser.add_argument("--socket", type=Path, default=Path.home() / ".damon/damon.sock")
+    parser.add_argument("--home", type=Path, default=Path.home() / ".damon")
     args = parser.parse_args()
-    server = DamonServer(args.socket, DamonService(Path.home() / ".damon").dispatch)
+    server = DamonServer(args.socket, DamonService(args.home).dispatch)
     server.start()
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown).start())
     server.serve_forever()

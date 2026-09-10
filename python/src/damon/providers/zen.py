@@ -38,12 +38,12 @@ def parse_sse(lines: Iterable[bytes]) -> Iterable[tuple[str, str]]:
 
 
 class ZenProvider:
-    def __init__(self, api_key: str, base_url: str = "https://opencode.ai/zen/v1",
+    def __init__(self, api_key: str, base_url: str | None = None,
                  session_id: str | None = None, project_id: str | None = None):
         if not api_key:
             raise ValueError("Zen API key is required")
         self._api_key = api_key
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or os.environ.get("DAMON_ZEN_BASE_URL") or "https://opencode.ai/zen/v1").rstrip("/")
         self.session_id = session_id or str(uuid.uuid4())
         self.project_id = project_id or os.environ.get("OPENCODE_PROJECT_ID")
 

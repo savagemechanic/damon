@@ -85,6 +85,7 @@ struct IPCRequest: Codable, Sendable {
     var name: String? = nil
     var description: String? = nil
     var category: String? = nil
+    var chatId: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case type, message, model, path, name, description, category
@@ -95,6 +96,7 @@ struct IPCRequest: Codable, Sendable {
         case pythonExecutable = "python_executable"
         case maxTurns = "max_turns"
         case executionTimeout = "execution_timeout"
+        case chatId = "chat_id"
     }
 }
 
@@ -112,4 +114,5 @@ struct IPCResponse: Codable, Sendable {
     var models: [ZenModel]? = nil
     var tools: [ToolRecord]? = nil
     var chats: [ChatRecord]? = nil
+    var messages: [MessageRecord]? = nil
 }

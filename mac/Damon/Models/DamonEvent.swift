@@ -5,12 +5,14 @@ struct DamonEvent: Codable, Equatable, Sendable, Identifiable {
     let runId: String
     let payload: [String: JSONValue]
     let timestamp: String
+    let chatId: String?
 
     var id: String { "\(runId)-\(timestamp)-\(type)" }
 
     enum CodingKeys: String, CodingKey {
         case type, payload, timestamp
         case runId = "run_id"
+        case chatId = "chat_id"
     }
 }
 
@@ -42,4 +44,8 @@ enum JSONValue: Codable, Equatable, Sendable {
     var string: String? { if case .string(let value) = self { value } else { nil } }
     var number: Double? { if case .number(let value) = self { value } else { nil } }
     var bool: Bool? { if case .bool(let value) = self { value } else { nil } }
+    var strings: [String]? {
+        guard case .array(let values) = self else { return nil }
+        return values.compactMap(\.string)
+    }
 }

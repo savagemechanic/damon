@@ -7,8 +7,14 @@ struct ConversationView: View {
         VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    if model.conversation.answer.isEmpty && model.conversation.python.isEmpty {
+                    if model.messages.isEmpty && model.conversation.answer.isEmpty && model.conversation.python.isEmpty {
                         ContentUnavailableView("Ask Damon", systemImage: "terminal", description: Text("Generated Python and real output appear here."))
+                    }
+                    ForEach(Array(model.messages.enumerated()), id: \.offset) { _, message in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(message.role == "user" ? "You" : "Damon").font(.caption).foregroundStyle(.secondary)
+                            Text(message.content).textSelection(.enabled)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
                     }
                     DisclosureGroup("Thinking") { Text(model.conversation.reasoning).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                         .disabled(model.conversation.reasoning.isEmpty)
@@ -18,7 +24,7 @@ struct ConversationView: View {
                         Text(model.conversation.stdout).font(.system(.body, design: .monospaced)).foregroundStyle(.primary)
                         Text(model.conversation.stderr).font(.system(.body, design: .monospaced)).foregroundStyle(.red)
                     }.disabled(model.conversation.stdout.isEmpty && model.conversation.stderr.isEmpty)
-                    Text(model.conversation.answer).textSelection(.enabled)
+                    if model.conversation.status != "Finished" { Text(model.conversation.answer).textSelection(.enabled) }
                 }.padding()
             }
             Divider()

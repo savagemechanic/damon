@@ -2,7 +2,7 @@ import Testing
 @testable import Damon
 
 private func event(_ type: String, _ payload: [String: JSONValue] = [:]) -> DamonEvent {
-    DamonEvent(type: type, runId: "run", payload: payload, timestamp: "now")
+    DamonEvent(type: type, runId: "run", payload: payload, timestamp: "now", chatId: nil)
 }
 
 @Test func streamEventsDriveVisibleState() {
@@ -13,7 +13,7 @@ private func event(_ type: String, _ payload: [String: JSONValue] = [:]) -> Damo
     state.apply(event("ExecutionStarted"))
     state.apply(event("StdoutDelta", ["delta": .string("1\n")]))
     state.apply(event("StderrDelta", ["delta": .string("warning")]))
-    state.apply(event("ExecutionFinished", ["duration": .number(0.2), "exit_code": .number(0)]))
+    state.apply(event("ExecutionFinished", ["duration": .number(0.2), "exit_code": .number(0), "changed_files": .array([.string("created:result.txt")])]))
     state.apply(event("RunFinished"))
     #expect(state.status == "Finished")
     #expect(state.reasoning == "think")
@@ -21,6 +21,7 @@ private func event(_ type: String, _ payload: [String: JSONValue] = [:]) -> Damo
     #expect(state.stdout == "1\n")
     #expect(state.stderr == "warning")
     #expect(state.exitCode == 0)
+    #expect(state.changedFiles == ["created:result.txt"])
 }
 
 @Test func thinkingEffortBelongsToModelSelection() {

@@ -7,7 +7,7 @@ struct DamonApp: App {
         WindowGroup("Damon") {
             HSplitView {
                 List(selection: $model.sidebarSelection) {
-                    Section("Chats") { ForEach(model.chats) { Text($0.title) } }
+                    Section("Chats") { ForEach(model.chats) { Text($0.title).tag("chat:\($0.id)") } }
                     Section("Library") { Label("Tools", systemImage: "hammer").tag("tools") }
                 }
                 .frame(minWidth: 170, idealWidth: 190, maxWidth: 230)
@@ -20,11 +20,12 @@ struct DamonApp: App {
                     VStack(spacing: 0) {
                         HStack { Text("Activity").font(.headline); Spacer() }.padding(12)
                         Divider()
-                        ActivityView(state: model.conversation, promote: model.promoteCurrentScript)
+                        ActivityView(state: model.conversation, promote: model.promoteCurrentScript, cancel: model.cancelRun)
                     }.frame(minWidth: 220, idealWidth: 250, maxWidth: 300)
                 }
             }.frame(minWidth: 960, minHeight: 640)
                 .task { model.start() }
+                .onChange(of: model.sidebarSelection) { _, value in model.selectSidebar(value) }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.stop() }
         }
         .commands {

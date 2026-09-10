@@ -18,6 +18,7 @@ struct ConversationState: Equatable, Sendable {
     var duration: Double?
     var exitCode: Int?
     var scriptPath: String?
+    var changedFiles: [String] = []
     var error: String?
 
     mutating func apply(_ event: DamonEvent) {
@@ -34,6 +35,7 @@ struct ConversationState: Equatable, Sendable {
             status = "Continuing"
             duration = event.payload["duration"]?.number
             exitCode = event.payload["exit_code"]?.number.map(Int.init)
+            changedFiles = event.payload["changed_files"]?.strings ?? []
         case "RunFinished": status = "Finished"
         case "Error":
             status = "Error"
@@ -54,6 +56,8 @@ final class AppModel: ObservableObject {
     @Published var models: [ZenModel] = []
     @Published var selectedModel = UserDefaults.standard.string(forKey: "selectedModel") ?? ""
     @Published var sidebarSelection = "conversation"
+    @Published var messages: [MessageRecord] = []
+    @Published var activeChatId: String?
     private let daemon = DaemonManager()
     private lazy var client = UnixSocketClient(path: daemon.socketPath)
 
@@ -132,11 +136,43 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func cancelRun() {
+        Task { @MainActor in
+            do { _ = try await client.request(IPCRequest(type: "cancel")) }
+            catch { conversation.error = String(describing: error) }
+        }
+    }
+
+    func clearAPIKey() {
+        Task { @MainActor in
+            do {
+                _ = try await client.request(IPCRequest(type: "clear_api_key"))
+                models = []
+                selectedModel = ""
+                conversation.status = "API key required"
+            } catch { conversation.error = String(describing: error) }
+        }
+    }
+
+    func selectSidebar(_ selection: String) {
+        guard selection.hasPrefix("chat:") else { return }
+        let chatId = String(selection.dropFirst(5))
+        activeChatId = chatId
+        Task { @MainActor in
+            do {
+                let lines = try await client.request(IPCRequest(type: "messages", chatId: chatId))
+                messages = try JSONDecoder().decode(IPCResponse.self, from: lines[0]).messages ?? []
+                conversation = ConversationState()
+            } catch { conversation.error = String(describing: error) }
+        }
+    }
+
     func send() {
         let message = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty, !selectedModel.isEmpty else { return }
         input = ""
         conversation = ConversationState(status: "Generating")
+        messages.append(MessageRecord(role: "user", content: message, createdAt: ""))
         let defaults = UserDefaults.standard
         Task { @MainActor in
             do {
@@ -150,19 +186,29 @@ final class AppModel: ObservableObject {
                     pythonExecutable: defaults.string(forKey: "pythonExecutable") ?? "python3",
                     maxTurns: maxTurns == 0 ? 8 : maxTurns,
                     executionTimeout: timeout == 0 ? 60 : timeout
+                    , chatId: activeChatId
                 ))
                 for try await line in lines {
-                    if let event = try? JSONDecoder().decode(DamonEvent.self, from: line) { receive(event) }
+                    if let event = try? JSONDecoder().decode(DamonEvent.self, from: line) {
+                        if event.type == "RunStarted" { activeChatId = event.chatId }
+                        receive(event)
+                    }
                     else if let error = try? JSONDecoder().decode(IPCResponse.self, from: line), error.type == "error" {
                         conversation.status = "Error"; conversation.error = error.message
                     }
                 }
+                if let chatId = activeChatId {
+                    let messageLines = try await client.request(IPCRequest(type: "messages", chatId: chatId))
+                    messages = try JSONDecoder().decode(IPCResponse.self, from: messageLines[0]).messages ?? messages
+                }
+                let chatLines = try await client.request(IPCRequest(type: "chats"))
+                chats = try JSONDecoder().decode(IPCResponse.self, from: chatLines[0]).chats ?? chats
             } catch { conversation.status = "Daemon disconnected"; conversation.error = String(describing: error) }
         }
     }
 
     func receive(_ event: DamonEvent) { conversation.apply(event) }
-    func newChat() { conversation = ConversationState(); input = "" }
+    func newChat() { conversation = ConversationState(); input = ""; messages = []; activeChatId = nil }
 }
 
 struct ToolRecord: Identifiable, Codable, Equatable, Sendable {
@@ -178,4 +224,11 @@ struct ChatRecord: Identifiable, Codable, Equatable, Sendable {
     let title: String
     let createdAt: String
     enum CodingKeys: String, CodingKey { case id, title; case createdAt = "created_at" }
+}
+
+struct MessageRecord: Codable, Equatable, Sendable {
+    let role: String
+    let content: String
+    let createdAt: String
+    enum CodingKeys: String, CodingKey { case role, content; case createdAt = "created_at" }
 }
