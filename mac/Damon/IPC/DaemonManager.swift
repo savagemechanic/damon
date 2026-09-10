@@ -11,13 +11,20 @@ final class DaemonManager {
         let source = resources.appending(path: "python/src").path
         guard FileManager.default.fileExists(atPath: source) else { throw IPCError.disconnected }
         let task = Process()
-        let candidates = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"]
+        let frameworks = resources.appending(path: "Frameworks")
+        let versions = frameworks.appending(path: "Python.framework/Versions")
+        let versionDirectory = (try? FileManager.default.contentsOfDirectory(at: versions, includingPropertiesForKeys: nil))?.first(where: { $0.lastPathComponent != "Current" })
+        let binaries = versionDirectory?.appending(path: "bin")
+        let bundled = binaries.flatMap { try? FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil) }?
+            .first(where: { $0.lastPathComponent.hasPrefix("python3.") && !$0.lastPathComponent.hasSuffix("-config") && FileManager.default.isExecutableFile(atPath: $0.path) })?.path
+        let candidates = [bundled, "/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"].compactMap { $0 }
         guard let python = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { throw IPCError.disconnected }
         task.executableURL = URL(fileURLWithPath: python)
         task.arguments = ["-m", "damon.ipc.server", "--socket", socketPath]
         var environment = ProcessInfo.processInfo.environment
         environment["PYTHONPATH"] = source
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        if bundled != nil { environment["DYLD_FRAMEWORK_PATH"] = frameworks.path }
         task.environment = environment
         task.standardOutput = FileHandle.nullDevice
         let logURL = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".damon/daemon.log")

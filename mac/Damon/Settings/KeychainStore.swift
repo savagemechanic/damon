@@ -38,4 +38,25 @@ struct KeychainStore: SecretStore, @unchecked Sendable {
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainError.status(status) }
     }
+
+    func readWithTimeout(seconds: Double = 1) async -> String? {
+        await withCheckedContinuation { continuation in
+            let gate = KeychainContinuationGate(continuation)
+            DispatchQueue.global(qos: .userInitiated).async { gate.resume((try? read()) ?? nil) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { gate.resume(nil) }
+        }
+    }
+}
+
+private final class KeychainContinuationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<String?, Never>?
+    init(_ continuation: CheckedContinuation<String?, Never>) { self.continuation = continuation }
+    func resume(_ value: String?) {
+        lock.lock()
+        let pending = continuation
+        continuation = nil
+        lock.unlock()
+        pending?.resume(returning: value)
+    }
 }

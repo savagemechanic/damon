@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test packages
+        run: |
+          python -m pip install -e '.[dev]'
+          python -m pip install -e './python[dev]'
+      - name: Python tests
+        run: |
+          python -m pytest -q
+          PYTHONPATH=python/src python -m pytest -q python/tests
+          python -m compileall -q python/src
+      - name: Swift tests
+        run: ./scripts/swift_test.sh
+      - name: Package and smoke test extracted artifact
+        run: ./scripts/smoke_test.sh
+      - name: Write release notes
+        run: |
+          commit="$(git rev-parse HEAD)"
+          printf '%s\n' \
+            "Damon ${GITHUB_REF_NAME}" \
+            "" \
+            "Native SwiftUI application with a local, bundled Python execution harness and OpenCode Zen streaming." \
+            "" \
+            "Commit: ${commit}" \
+            "" \
+            "Installation: extract the arm64 zip and move Damon.app to Applications." \
+            "" \
+            "Known limitations: arm64 only; ad-hoc signed and not notarized; generated Python runs with current-user permissions." \
+            > dist/release-notes.md
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/Damon-v0.1.0-macos-arm64.zip \
+            dist/Damon-v0.1.0-macos-arm64.zip.sha256 \
+            --title "Damon $GITHUB_REF_NAME" \
+            --notes-file dist/release-notes.md

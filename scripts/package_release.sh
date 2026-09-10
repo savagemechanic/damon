@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-"$root/scripts/build_release.sh"
+DAMON_BUNDLE_PYTHON=1 "$root/scripts/build_release.sh"
 mkdir -p "$root/dist"
 archive="$root/dist/Damon-v0.1.0-macos-arm64.zip"
 ditto -c -k --sequesterRsrc --keepParent "$root/build/Damon.app" "$archive"

@@ -19,7 +19,7 @@ final class SettingsModel: ObservableObject {
     init(secrets: SecretStore = KeychainStore()) {
         self.secrets = secrets
         if let store = secrets as? KeychainStore {
-            Task { apiKey = (try? await Task.detached { try store.read() }.value) ?? "" }
+            Task { apiKey = await store.readWithTimeout() ?? "" }
         } else {
             apiKey = (try? secrets.read()) ?? ""
         }

@@ -82,7 +82,7 @@ final class AppModel: ObservableObject {
         tools = try JSONDecoder().decode(IPCResponse.self, from: toolLines[0]).tools ?? []
         let chatLines = try await client.request(IPCRequest(type: "chats"))
         chats = try JSONDecoder().decode(IPCResponse.self, from: chatLines[0]).chats ?? []
-        let key = try await Task.detached { try KeychainStore().read() }.value
+        let key = await KeychainStore().readWithTimeout()
         guard let key, !key.isEmpty else {
             conversation.status = "API key required"
             return
